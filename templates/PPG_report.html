@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PBJ Report Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <style>
+        /* Loading overlay styles */
+        .loading-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0,0,0,0.4);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 9999;
+            transition: opacity 0.2s;
+        }
+        .loading-box {
+            background: #fff;
+            border-radius: 16px;
+            padding: 40px 60px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+            text-align: center;
+        }
+        .loading-spinner {
+            width: 3rem; height: 3rem;
+            border: 0.4rem solid #e0e0e0;
+            border-top: 0.4rem solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 18px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .hero-header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 32px;
+            margin-bottom: 2.5rem;
+        }
+        .puzzle-logo {
+            max-width: 120px;
+            max-height: 120px;
+            border-radius: 18px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.10);
+            background: #fff;
+            padding: 8px;
+        }
+        .dashboard-container {
+            /* ...existing code... */
+            position: relative;
+        }
+        .dashboard-bg-puzzle {
+            position: absolute;
+            right: 2vw;
+            top: 2vw;
+            opacity: 0.08;
+            z-index: 0;
+            max-width: 300px;
+            pointer-events: none;
+        }
+        body { background: #f8f9fa; }
+        .dashboard-container { width: 80vw; max-width: 1400px; margin: 40px auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 32px; }
+        .logo-preview { max-width: 120px; max-height: 80px; margin-top: 8px; }
+    </style>
+</head>
+<body>
+<div class="dashboard-container">
+    <div id="loading-overlay" class="loading-overlay" style="display:none;">
+        <div class="loading-box">
+            <div class="loading-spinner"></div>
+            <div class="fw-bold fs-5 mb-1">Generating your report...</div>
+            <div class="text-secondary">Please wait while we process your data.</div>
+        </div>
+    </div>
+    <img src="\static\Puzzle_logo.png" class="dashboard-bg-puzzle" alt="Puzzle Logo Background" />
+    <div class="hero-header">
+        <img src="\static\Puzzle_logo.png" class="puzzle-logo" alt="Puzzle Logo" />
+        <div>
+            <h2 class="mb-1 fw-bold" style="font-size:2.3rem;"><span class="me-2"></span>PBJ Report Dashboard</h2>
+        </div>
+    </div>
+    <form id="dashboard-form">
+        <div class="row g-4 justify-content-center align-items-stretch position-relative" style="z-index:1;">
+            <div class="col-lg-7 col-md-12 d-flex flex-column gap-4">
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-body">
+                        <h5 class="card-title mb-3"><span class="me-2">📁</span>Upload Data</h5>
+                        <label for="file-upload" class="form-label">Upload charge_capture_df (.csv or .xlsx)</label>
+                        <input class="form-control" type="file" id="file-upload" accept=".csv,.xlsx">
+                    </div>
+                </div>
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-body">
+                        <h5 class="card-title mb-3"><span class="me-2"></span>Report Settings</h5>
+                        <div class="mb-3">
+                            <label class="form-label">Select Report Type</label>
+                            <select class="form-select" id="report-type">
+                                <option value="overview">Overview</option>
+                                <option value="detailed">Detailed</option>
+                                <option value="Both">Both</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="month-selector" class="form-label">Select Month</label>
+                            <select class="form-select" id="month-selector">
+                                <option value="0">January</option>
+                                <option value="1">February</option>
+                                <option value="2">March</option>
+                                <option value="3">April</option>
+                                <option value="4">May</option>
+                                <option value="5">June</option>
+                                <option value="6">July</option>
+                                <option value="7">August</option>
+                                <option value="8">September</option>
+                                <option value="9">October</option>
+                                <option value="10">November</option>
+                                <option value="11">December</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Export Options</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" value="ppt" id="export-ppt">
+                                <label class="form-check-label" for="export-ppt">PowerPoint</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" value="excel" id="export-excel">
+                                <label class="form-check-label" for="export-excel">Excel</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card shadow-sm border-0">
+                    <div class="card-body">
+                        <h5 class="card-title mb-3"><span class="me-2"></span>Logo Upload</h5>
+                        <label for="logo-upload" class="form-label">Upload Logo & Assign Name</label>
+                        <input class="form-control" type="file" id="logo-upload" accept="image/*">
+                        <input class="form-control mt-2" type="text" id="logo-name" placeholder="Enter name for logo (e.g. Facility or Corporate)">
+                        <button type="button" class="btn btn-outline-primary mt-2" id="upload-logo-btn">Upload Logo</button>
+                        <img id="logo-preview" class="logo-preview d-none" src="#" alt="Logo Preview">
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-5 col-md-12">
+                <div class="card shadow-sm border-0 h-100">
+                    <div class="card-body">
+                        <h5 class="card-title mb-3"><span class="me-2"></span>CPT Code Time Conversion Table</h5>
+                        <table class="table table-bordered align-middle mb-2" id="cpt-time-table">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>CPT Code</th>
+                                    <th>Time Spent (minutes)</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <td><input type="text" class="form-control" value="99304" readonly></td>
+                                    <td><input type="number" class="form-control" value="60"></td>
+                                    <td></td>
+                                </tr>
+                                <tr>
+                                    <td><input type="text" class="form-control" value="99305" readonly></td>
+                                    <td><input type="number" class="form-control" value="75"></td>
+                                    <td></td>
+                                </tr>
+                                <tr>
+                                    <td><input type="text" class="form-control" value="99306" readonly></td>
+                                    <td><input type="number" class="form-control" value="90"></td>
+                                    <td></td>
+                                </tr>
+                                <tr>
+                                    <td><input type="text" class="form-control" value="99307" readonly></td>
+                                    <td><input type="number" class="form-control" value="15"></td>
+                                    <td></td>
+                                </tr>
+                                <tr>
+                                    <td><input type="text" class="form-control" value="99308" readonly></td>
+                                    <td><input type="number" class="form-control" value="25"></td>
+                                    <td></td>
+                                </tr>
+                                <tr>
+                                    <td><input type="text" class="form-control" value="99309" readonly></td>
+                                    <td><input type="number" class="form-control" value="35"></td>
+                                    <td></td>
+                                </tr>
+                                <tr>
+                                    <td><input type="text" class="form-control" value="99310" readonly></td>
+                                    <td><input type="number" class="form-control" value="45"></td>
+                                    <td></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <button type="button" class="btn btn-outline-primary btn-sm" id="add-cpt-row">➕ Add CPT Code</button>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 text-center">
+                <button type="submit" class="btn btn-primary btn-lg mt-3 px-5">Generate Report</button>
+            </div>
+        </div>
+    </form>
+</div>
+<script>
+    // Logo upload button handler
+    document.getElementById('upload-logo-btn').addEventListener('click', async function() {
+        const logoInput = document.getElementById('logo-upload');
+        const logoNameInput = document.getElementById('logo-name');
+        const file = logoInput.files[0];
+        const name = logoNameInput.value.trim();
+        if (!file || !name) {
+            alert('Please select a logo file and enter a name.');
+            return;
+        }
+        const formData = new FormData();
+        formData.append('logo', file);
+        formData.append('corp_name', name);
+        try {
+            const response = await fetch('/upload_logo', {
+                method: 'POST',
+                body: formData
+            });
+            const result = await response.json();
+            if (result.success) {
+                alert('Logo uploaded successfully!');
+            } else {
+                alert('Logo upload failed: ' + (result.error || 'Unknown error'));
+            }
+        } catch (err) {
+            alert('Error uploading logo: ' + err.message);
+        }
+    });
+    // CPT Time Table: Add/Remove/Edit functionality
+    document.getElementById('add-cpt-row').addEventListener('click', function() {
+        const tbody = document.querySelector('#cpt-time-table tbody');
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td><input type="text" class="form-control" placeholder="CPT Code"></td>
+            <td><input type="number" class="form-control" placeholder="Minutes"></td>
+            <td><button type="button" class="btn btn-danger btn-sm remove-cpt-row">Remove</button></td>
+        `;
+        tbody.appendChild(row);
+    });
+    document.querySelector('#cpt-time-table').addEventListener('click', function(e) {
+        if (e.target.classList.contains('remove-cpt-row')) {
+            e.target.closest('tr').remove();
+        }
+    });
+    // Logo preview
+    document.getElementById('logo-upload').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        const preview = document.getElementById('logo-preview');
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                preview.src = evt.target.result;
+                preview.classList.remove('d-none');
+            };
+            reader.readAsDataURL(file);
+        } else {
+            preview.src = '#';
+            preview.classList.add('d-none');
+        }
+    });
+
+    // API: Send CSV and CPT Code Time Table as dict to backend
+    document.getElementById('dashboard-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const fileInput = document.getElementById('file-upload');
+        const file = fileInput.files[0];
+        if (!file) {
+            alert('Please upload a .csv or .xlsx file.');
+            return;
+        }
+        // Build CPT dict from table
+        const cptDict = {};
+        document.querySelectorAll('#cpt-time-table tbody tr').forEach(row => {
+            const code = row.querySelector('td:nth-child(1) input').value.trim();
+            const mins = row.querySelector('td:nth-child(2) input').value.trim();
+            if (code && mins) {
+                cptDict[code] = Number(mins);
+            }
+        });
+        // Get month and report type
+        const month = document.getElementById('month-selector').value;
+        const reportType = document.getElementById('report-type').value;
+        // Prepare form data
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('cpt_time_dict', JSON.stringify(cptDict));
+        formData.append('month', month);
+        formData.append('report_type', reportType);
+        // Show loading overlay
+        document.getElementById('loading-overlay').style.display = 'flex';
+        try {
+            const response = await fetch('/upload_data', {
+                method: 'POST',
+                body: formData
+            });
+            if (!response.ok) {
+                document.getElementById('loading-overlay').style.display = 'none';
+                alert('Upload failed.');
+                return;
+            }
+            const result = await response.json();
+            if (result.success && result.pptx_path) {
+                // Trigger download
+                const downloadUrl = result.pptx_path.startsWith('/') ? result.pptx_path : ('/' + result.pptx_path);
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = 'generated_pbj_report.pptx';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            } else {
+                alert('Processing failed.');
+            }
+        } catch (err) {
+            alert('Error uploading: ' + err.message);
+        } finally {
+            document.getElementById('loading-overlay').style.display = 'none';
+        }
+    });
+</script>
+</body>
+</html>

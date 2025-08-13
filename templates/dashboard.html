@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>CPT Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+    <style>
+        /* Basic styling for the button, you can integrate this into your style.css */
+        .shutdown-button {
+            background-color: #dc3545;
+            /* Red color */
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 20px;
+        }
+
+        .shutdown-button:hover {
+            background-color: #c82333;
+        }
+
+        body {
+            background-color: #f4f4f9;
+        }
+
+        .card {
+            border-radius: 15px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+        }
+
+        .highlight {
+            background-color: #fff3cd;
+        }
+
+        .error {
+            background-color: #f8d7da;
+        }
+
+        .cpt-input {
+            width: 100px;
+        }
+
+        .success-badge {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .position-badge {
+            margin-left: 4px;
+            font-size: 0.9em;
+        }
+
+        @keyframes dots {
+
+            0%,
+            20% {
+                content: '';
+            }
+
+            40% {
+                content: '.';
+            }
+
+            60% {
+                content: '..';
+            }
+
+            80%,
+            100% {
+                content: '...';
+            }
+        }
+
+        /* Full-page loading overlay */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            backdrop-filter: blur(3px);
+        }
+
+        .loading-container {
+            background-color: rgba(0, 0, 0, 0.6);
+            border-radius: 10px;
+            padding: 30px 50px;
+            text-align: center;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.3);
+            max-width: 80%;
+        }
+
+        .loading-container .spinner-border {
+            width: 4rem;
+            height: 4rem;
+        }
+
+        /* Animation for the loading text */
+        @keyframes dots {
+
+            0%,
+            20% {
+                content: '';
+            }
+
+            40% {
+                content: '.';
+            }
+
+            60% {
+                content: '..';
+            }
+
+            80%,
+            100% {
+                content: '...';
+            }
+        }
+
+        .loading-text::after {
+            content: '';
+            animation: dots 1.5s infinite;
+        }
+
+        /* Prevent scrolling when overlay is active */
+        body.loading-active {
+            overflow: hidden;
+        }
+
+        .toast-container {
+            z-index: 1050;
+        }
+
+        .toast {
+            min-width: 250px;
+        }
+    </style>
+</head>
+
+<body class="p-4">
+    <div class="container">
+        <h2 class="mb-4 text-center">Payroll Automation</h2>
+
+
+        <form id="uploadForm" enctype="multipart/form-data">
+            <div class="mb-3">
+                <label class="form-label">Output File Name</label>
+                <input type="text" id="outputFileName" name="outputFileName" class="form-control"
+                    placeholder="e.g., processed_payroll.xlsx" value="processed_payroll.xlsx">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Upload Payroll Excel File</label>
+                <input type="file" id="payrollFile" name="payrollFile" class="form-control" accept=".xlsx">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Upload Charge Capture Excel File</label>
+                <input type="file" id="captureFile" name="captureFile" class="form-control" accept=".xlsx">
+            </div>
+
+            <div class="row g-3 mb-4">
+                <div class="col-md-6">
+                    <label class="form-label">Select Payroll Sheet</label>
+                    <select class="form-select" id="payrollSheetSelect" name="payrollSheet"></select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Select Capture Sheet</label>
+                    <select class="form-select" id="captureSheetSelect" name="captureSheet"></select>
+                </div>
+            </div>
+
+            <button class="btn btn-primary mb-4" onclick="processData(event)">Process Files</button>
+            <div id="loadingOverlay" class="loading-overlay" style="display: none;">
+                <div class="loading-container">
+                    <div class="spinner-border text-light" role="status" style="width: 3rem; height: 3rem;">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                    <h4 class="mt-3 text-white loading-text">Processing files</h4>
+                    <p class="text-light" id="processingFileName">Preparing to process your files</p>
+                </div>
+            </div>
+            <!-- Dashboard Output -->
+            <div id="dashboard" style="display: none;">
+                <!-- Invalid CPT Section -->
+                <div class="card p-3 mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h4>⚠️ Providers With Invalid CPT Codes</h4>
+                        <div class="pagination-controls">
+                            <button class="btn btn-sm btn-secondary" onclick="prevInvalidProvider()">← Previous</button>
+                            <span id="currentProviderCount">0/0</span>
+                            <button class="btn btn-sm btn-secondary" onclick="nextInvalidProvider()">Next →</button>
+                        </div>
+                    </div>
+                    <ul id="invalidCPTList" class="list-group"></ul>
+                </div>
+                <!-- Add New CPT Code Panel -->
+                <div class="card p-3 mb-4">
+                    <h4 class="mb-3">➕ Add New CPT Code Column</h4>
+                    <div class="d-flex gap-3">
+                        <input type="text" id="newCPTCode" class="form-control w-auto"
+                            placeholder="Enter new CPT code (e.g., 99381)">
+                        <button class="btn btn-success" onclick="addNewCPTCode()">Add CPT</button>
+                    </div>
+                </div>
+
+                <!-- Missing Providers Section -->
+                <div class="card p-3 mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h4 class="mb-0">🧑‍⚕️ Providers With Missing CPTs</h4>
+                        <button class="btn btn-sm btn-success" onclick="saveAllCPTs(event)">Save All Changes</button>
+                    </div>
+                    <div id="missingProviders" class="row g-3"></div>
+                </div>
+
+                <div id="successMessage" class="alert alert-success d-none" role="alert"></div>
+            </div>
+    </div>
+
+    <script>
+        const CPT_REGEX = /^993\d{2}$/;
+        let providerCPTData = {};
+        let pendingChanges = {};
+        let currentInvalidIndex = 0;
+        let invalidProviders = [];
+
+        document.getElementById('payrollFile').addEventListener('change', function (e) {
+            // Clear any previous results when a new file is selected
+            updateSheetSelect(e.target, 'payrollSheetSelect');
+        });
+
+        document.getElementById('captureFile').addEventListener('change', function (e) {
+            // Clear any previous results when a new file is selected
+            updateSheetSelect(e.target, 'captureSheetSelect');
+        });
+        function updateSheetSelect(fileInput, selectId) {
+            const file = fileInput.files[0];
+            if (!file) {
+                document.getElementById(selectId).innerHTML = '';
+                return;
+            }
+
+            const reader = new FileReader();
+
+            reader.onload = function (e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const select = document.getElementById(selectId);
+
+                    // Clear existing options
+                    select.innerHTML = '';
+
+                    // Add new options
+                    workbook.SheetNames.forEach(name => {
+                        const option = document.createElement('option');
+                        option.value = name;
+                        option.textContent = name;
+                        select.appendChild(option);
+                    });
+
+                    // Enable process button if both sheets are selected
+                    enableProcessButtonIfReady();
+                } catch (error) {
+                    console.error("Error parsing Excel file:", error);
+                    alert("Could not read the Excel file. Please make sure it's a valid Excel file.");
+                }
+            };
+
+            reader.onerror = function () {
+                console.error("FileReader error");
+                alert("Error reading the file. Please try again.");
+            };
+
+            // Read as array buffer for better reliability
+            reader.readAsArrayBuffer(file);
+        }
+        // Show loading overlay - utility function
+        function showLoading(message = 'Processing') {
+            const overlay = document.getElementById('loadingOverlay');
+            const processingText = document.getElementById('processingFileName');
+
+            // Set the message
+            processingText.textContent = message;
+
+            // Show the overlay
+            overlay.style.display = 'flex';
+
+            // Prevent scrolling
+            document.body.classList.add('loading-active');
+
+            return {
+                // Update the message
+                updateMessage: (newMessage) => {
+                    processingText.textContent = newMessage;
+                },
+
+                // Hide the overlay
+                hide: () => {
+                    overlay.style.display = 'none';
+                    document.body.classList.remove('loading-active');
+                }
+            };
+        }
+        async function processData() {
+            event.preventDefault();
+
+            const button = event.target;
+            button.disabled = true;
+            document.getElementById('dashboard').style.display = 'none';
+
+
+
+            const formData = new FormData();
+
+            const loader = showLoading('Initializing...');
+            // Always get fresh file references
+            const payrollFile = document.getElementById('payrollFile').files[0];
+            const captureFile = document.getElementById('captureFile').files[0];
+
+            if (!payrollFile || !captureFile) {
+                alert("Please upload both Payroll and Charge Capture files.");
+                button.disabled = false;
+                loader.hide();
+                return;
+            }
+            loader.updateMessage(`Processing: ${payrollFile.name} & ${captureFile.name}`);
+            formData.append('payrollFile', payrollFile);
+            formData.append('captureFile', captureFile);
+            formData.append('payrollSheet', document.getElementById('payrollSheetSelect').value);
+            formData.append('captureSheet', document.getElementById('captureSheetSelect').value);
+            const outputFileName = document.getElementById('outputFileName').value.trim() || 'processed_payroll.xlsx';
+            formData.append('outputFileName', outputFileName);
+            try {
+                loader.updateMessage('Uploading files to server...');
+                const response = await fetch('/process', {
+                    method: 'POST',
+                    body: formData
+                });
+                // Update loading message for processing
+                loader.updateMessage('Server processing your files...');
+                const data = await response.json();
+
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    loader.hide();
+                    document.getElementById('payrollFile').value = '';
+                    document.getElementById('captureFile').value = '';
+                    document.getElementById('payrollSheetSelect').innerHTML = '';
+                    document.getElementById('captureSheetSelect').innerHTML = '';
+                    return;
+                }
+
+
+                // Show dashboard
+                loader.hide();
+                document.getElementById('dashboard').style.display = 'block';
+                // Process invalid CPTs
+                invalidProviders = data.invalidCPTs || [];
+                currentInvalidIndex = 0;
+                updateInvalidProviderDisplay();
+
+                // Process missing providers
+                const providerContainer = document.getElementById("missingProviders");
+
+                if (!data.missingProviders || data.missingProviders.length === 0) {
+                    providerContainer.innerHTML = `<div class="col-12 text-center text-muted">All CPT codes are complete!</div>`;
+                    return;
+                }
+                loader.hide();
+
+                providerContainer.innerHTML = data.missingProviders.map(provider => `
+  <div class="col-md-6">
+    <div class="card p-2 mb-2">
+      <div class="d-flex justify-content-between align-items-center">
+        <div class="fw-bold">${provider.provider}</div>
+      </div>
+
+      ${provider.positions.map((pos, i) => `
+        <div class="position-row mt-2 d-flex gap-2 align-items-center">
+          <span class="badge bg-warning position-badge">#${pos}</span>
+          <small class="text-muted">DOS: ${provider.DOS[i]}</small>
+          <input type="text" class="form-control cpt-input" placeholder="CPT"
+                 data-provider="${provider.provider}" data-position="${pos}" data-dos="${provider.DOS[i]}">
+          <button class="btn btn-sm btn-primary"
+                  onclick="addCPTForPosition('${provider.provider}', ${pos}, this.previousElementSibling.value, '${provider.DOS[i]}')">
+            Add
+          </button>
+        </div>
+      `).join('')}
+
+      <div class="mt-2" id="badges-${provider.provider.replace(/ /g, '_')}"></div>
+    </div>
+  </div>
+`).join('');
+
+
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Processing failed: ' + error.message);
+                document.getElementById('payrollFile').value = '';
+                document.getElementById('captureFile').value = '';
+                document.getElementById('payrollSheetSelect').innerHTML = '';
+                document.getElementById('captureSheetSelect').innerHTML = '';
+                loader.hide();
+            } finally {
+                button.disabled = false;
+            }
+        }
+        function enableProcessButtonIfReady() {
+            const payrollOptions = document.getElementById('payrollSheetSelect').options.length;
+            const captureOptions = document.getElementById('captureSheetSelect').options.length;
+            const button = document.querySelector('button[onclick^="processData"]');
+            button.disabled = !(payrollOptions && captureOptions);
+        }
+        function updateInvalidProviderDisplay() {
+            const currentProvider = invalidProviders[currentInvalidIndex];
+            const countElement = document.getElementById("currentProviderCount");
+            const listElement = document.getElementById("invalidCPTList");
+
+            countElement.textContent = `${currentInvalidIndex + 1}/${invalidProviders.length}`;
+
+            // Fix: Handle both array and object formats for found CPTs
+            let foundDisplay = '';
+            if (currentProvider) {
+                if (Array.isArray(currentProvider.found)) {
+                    // Handle array case
+                    foundDisplay = currentProvider.found.join(', ');
+                } else if (currentProvider.found && typeof currentProvider.found === 'object') {
+                    // Handle object case with null check
+                    foundDisplay = Object.entries(currentProvider.found)
+                        .map(([cpt, count]) => `${cpt} with ${Number(count) || 0} encounter${Number(count) === 1 ? '' : 's'}`)
+                        .join(', ');
+                } else {
+                    // Fallback for unexpected formats
+                    foundDisplay = "No invalid CPTs found";
+                    console.warn("Unexpected found format:", currentProvider.found);
+                }
+            }
+
+            listElement.innerHTML = currentProvider ? `
+        <li class='list-group-item error'>
+            ❌ Unrecognized CPTs found for <strong>${currentProvider.name}</strong>
+            <br><small>Found: ${foundDisplay}</small>
+        </li>
+    ` : '<li class="list-group-item">No invalid CPT providers found</li>';
+        }
+
+        function nextInvalidProvider() {
+            if (currentInvalidIndex < invalidProviders.length - 1) {
+                currentInvalidIndex++;
+                updateInvalidProviderDisplay();
+            }
+        }
+
+        function prevInvalidProvider() {
+            if (currentInvalidIndex > 0) {
+                currentInvalidIndex--;
+                updateInvalidProviderDisplay();
+            }
+        }
+        async function addCPTForPosition(provider, position, cptCode, dos) {
+            try {
+                const response = await fetch('/add_missing_cpt', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        provider,
+                        position,
+                        cpt: cptCode,
+                        dos
+                    })
+                });
+                console.log(provider, position, cptCode, dos)
+                const result = await response.json();
+
+                if (result.error) {
+                    alert(result.error);
+                    return;
+                }
+
+                const inputElement = document.querySelector(`input[data-provider="${provider}"][data-position="${position}"]`);
+                if (inputElement) {
+                    const rowElement = inputElement.closest('.position-row');
+                    rowElement.innerHTML = `
+                <div class="d-flex align-items-center justify-content-between">
+                    <div>
+                        <span class="badge bg-warning position-badge me-2">#${position}</span>
+                        <span class="date-display">DOS: ${dos}</span>
+                    </div>
+                    <span class="badge bg-success">CPT: ${cptCode} ✓</span>
+                </div>
+            `;
+                }
+
+                const successMessage = document.getElementById('successMessage');
+                successMessage.classList.remove('d-none');
+                successMessage.textContent = `Added CPT ${cptCode} for ${provider} at position #${position}`;
+                setTimeout(() => successMessage.classList.add('d-none'), 3000);
+
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Failed to add CPT code');
+            }
+        }
+        // Save All CPTs function
+        async function saveAllCPTs(event) {
+            if (event) event.preventDefault();
+
+            // Show loading
+            const loader = showLoading('Preparing your download...');
+
+            try {
+                // Request the file
+                const response = await fetch('/save_changes', {
+                    method: 'POST'
+                });
+
+                // Check for server errors
+                if (!response.ok) {
+                    let errorMsg;
+                    try {
+                        const errorData = await response.json();
+                        errorMsg = errorData.error || `Server error: ${response.status}`;
+                    } catch (e) {
+                        errorMsg = `Failed to download file. Server status: ${response.status}`;
+                    }
+
+                    loader.hide();
+                    showErrorMessage(errorMsg);
+                    return;
+                }
+
+                // Update loader message
+                loader.updateMessage('Download starting...');
+
+                // Get the blob data
+                const blob = await response.blob();
+
+                // Get filename from header or use default
+                const disposition = response.headers.get('Content-Disposition');
+                let fileName = 'processed_payroll.xlsx';
+
+                if (disposition && disposition.includes('filename=')) {
+                    const filenameRegex = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/;
+                    const matches = filenameRegex.exec(disposition);
+                    if (matches && matches[1]) {
+                        fileName = matches[1].replace(/['"]/g, '');
+                    }
+                }
+
+                // Use user's preferred filename if provided
+                const userFileName = document.getElementById('outputFileName').value.trim();
+                if (userFileName) {
+                    fileName = userFileName.endsWith('.xlsx') ? userFileName : userFileName + '.xlsx';
+                }
+
+                // Create URL and download link
+                const blobUrl = window.URL.createObjectURL(blob);
+                const downloadLink = document.createElement('a');
+                downloadLink.href = blobUrl;
+                downloadLink.download = fileName;
+
+                // Append, click, and clean up
+                document.body.appendChild(downloadLink);
+                downloadLink.style.display = 'none';
+
+                // Hide loader just before clicking download
+                loader.hide();
+
+                // Trigger download
+                downloadLink.click();
+
+                // Clean up
+                setTimeout(() => {
+                    document.body.removeChild(downloadLink);
+                    window.URL.revokeObjectURL(blobUrl);
+
+                    // Show success message
+                    const successMessage = document.getElementById('successMessage');
+                    successMessage.textContent = `File "${fileName}" download started.`;
+                    successMessage.classList.remove('d-none');
+
+                    setTimeout(() => {
+                        successMessage.classList.add('d-none');
+                    }, 5000);
+                }, 100);
+
+            } catch (error) {
+                console.error('Download error:', error);
+                loader.hide();
+                showErrorMessage('Failed to download file: ' + error.message);
+            }
+        }
+
+        // Error message display function
+        function showErrorMessage(message) {
+            // Create error alert if it doesn't exist
+            let errorAlert = document.getElementById('errorMessage');
+            if (!errorAlert) {
+                errorAlert = document.createElement('div');
+                errorAlert.id = 'errorMessage';
+                errorAlert.className = 'alert alert-danger alert-dismissible fade show';
+                errorAlert.innerHTML = `
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"
+                    onclick="this.parentElement.remove()"></button>
+            <div class="error-content"></div>
+        `;
+                document.querySelector('.container').insertBefore(errorAlert, document.querySelector('.container').firstChild);
+            }
+
+            // Update message
+            errorAlert.querySelector('.error-content').textContent = message;
+
+            // Auto hide after 8 seconds
+            setTimeout(() => {
+                if (errorAlert.parentNode) {
+                    errorAlert.remove();
+                }
+            }, 8000);
+        }
+
+        // Helper functions for showing messages
+        function showSuccessMessage(message) {
+            const successMessage = document.getElementById('successMessage');
+            successMessage.textContent = message;
+            successMessage.classList.remove('d-none');
+
+            // Hide after 5 seconds
+            setTimeout(() => {
+                successMessage.classList.add('d-none');
+            }, 5000);
+        }
+
+
+
+
+        async function addNewCPTCode() {
+            const cptCode = document.getElementById('newCPTCode').value.trim();
+
+            if (!cptCode) {
+                alert("Please enter a CPT code.");
+                return;
+            }
+
+            try {
+                const response = await fetch('/add_new_cpt_column', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cpt: cptCode })
+                });
+
+                // Always check response.ok first for proper error handling
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({})); // Try to parse JSON error, fallback to empty object
+                    alert(errorData.error || `Server error: ${response.status} ${response.statusText}`);
+                    console.error('API Error:', errorData);
+                    return;
+                }
+
+                const result = await response.json(); // This will only run if response.ok is true
+
+                if (result.success) {
+                    alert(`CPT column for ${cptCode} added successfully.`);
+                    document.getElementById('newCPTCode').value = '';
+
+                    // --- CRUCIAL CHANGE HERE ---
+                    // Transform the object received from the backend into an array
+                    // that matches the 'invalidProviders' expected format.
+                    invalidProviders = Object.entries(result.invalid_cpts || {}).map(([name, data]) => {
+                        // 'data' already contains 'name' and the CPT counts as an object
+                        return {
+                            name: data.name, // Use the 'name' property from the backend data
+                            found: { ...data } // Copy all other CPTs into 'found' object
+                        };
+                    });
+
+                    // Remove the 'name' property from the 'found' object after copying
+                    // as it's redundant there and your display logic handles it
+                    invalidProviders.forEach(provider => {
+                        if (provider.found) {
+                            delete provider.found.name;
+                        }
+                    });
+                    // --- END CRUCIAL CHANGE ---
+
+                    console.log("Updated invalidProviders (after transformation):", invalidProviders);
+
+                    currentInvalidIndex = 0; // Reset to the first invalid provider
+                    // Only call update display if there are invalid providers
+                    if (invalidProviders.length > 0) {
+                        updateInvalidProviderDisplay();
+                    } else {
+                        // If no invalid providers, clear the display or show a "None found" message
+                        document.getElementById("currentProviderCount").textContent = "0/0";
+                        document.getElementById("invalidCPTList").innerHTML = '<li class="list-group-item">No unrecognized CPT providers found</li>';
+                    }
+
+                } else {
+                    // This 'else' block handles cases where 'success' is explicitly false in the JSON
+                    alert(result.error || 'Failed to add CPT column.');
+                }
+            } catch (error) {
+                console.error('Network or parsing error:', error);
+                alert('Error sending CPT code to server or processing response.');
+            }
+        }
+        function showToast(message, type = 'success') {
+            // Remove any existing toasts
+            document.querySelectorAll('.toast-container').forEach(el => el.remove());
+
+            // Create toast container
+            const toastContainer = document.createElement('div');
+            toastContainer.className = 'toast-container position-fixed bottom-0 end-0 p-3';
+
+            // Create toast element
+            const toastEl = document.createElement('div');
+            toastEl.className = `toast show bg-${type} text-white`;
+            toastEl.setAttribute('role', 'alert');
+            toastEl.setAttribute('aria-live', 'assertive');
+            toastEl.setAttribute('aria-atomic', 'true');
+
+            // Create toast content
+            toastEl.innerHTML = `
+        <div class="toast-header bg-${type} text-white">
+            <strong class="me-auto">${type === 'success' ? 'Success' : 'Error'}</strong>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast" aria-label="Close" 
+                    onclick="this.parentElement.parentElement.parentElement.remove()"></button>
+        </div>
+        <div class="toast-body">
+            ${message}
+        </div>
+    `;
+
+            // Add to container and page
+            toastContainer.appendChild(toastEl);
+            document.body.appendChild(toastContainer);
+
+            // Auto-remove after 5 seconds
+            setTimeout(() => {
+                if (toastContainer.parentNode) {
+                    toastContainer.remove();
+                }
+            }, 5000);
+        }
+    </script>
+</body>
+
+</html>
