@@ -308,6 +308,10 @@ def build_metadata(charge_capture_df, company_roster_df):
     grouped_CR = CR_filtered_df.groupby('State/Region')
     cpt_pattern = re.compile(r'\b993\d{2}\b')  # Example pattern for 6-digit codes starting with 9930
     Region_data = pd.DataFrame(columns=['Clinician', 'Gross Encounters', 'C99304', 'C99305', 'C99306', 'C99307', 'C99308', 'C99309', 'C99310','Drafts','CCM_counts',"manager","region"])
+    # Ensure region and manager columns are object dtype to avoid FutureWarning
+    Region_data['region'] = Region_data['region'].astype(object)
+    Region_data['manager'] = Region_data['manager'].astype(object)
+
     for name, group in grouped_CC:
     
         group['CPT Codes'] = group['CPT Codes'].astype(str).str.split(',')
@@ -459,7 +463,7 @@ def generate_pbj_presentation(prs:Presentation,Regional_Dashboard: pd.DataFrame,
                 if shape.has_text_frame:
                     for paragraph in shape.text_frame.paragraphs:
                         for run in paragraph.runs:
-                            run.text = run.text.replace("Region", f"{region_name[0]} - Managers: {region_name[1]}")
+                            run.text = run.text.replace("Region", f"{region_name[0]} - Manager: {region_name[1]}")
                 if shape.has_table:
                     table = shape.table
                     fontSize = table.cell(0, 0).text_frame.paragraphs[0].runs[0].font.size
@@ -530,9 +534,17 @@ def upload_data():
     Roster_file.save(roster_temp_path)
     # Load DataFrame
 
-    charge_capture_df = pd.read_excel(capture_temp_path)
+    # Read charge capture file
+    if capture_file_filename.endswith('.csv'):
+        charge_capture_df = pd.read_csv(capture_temp_path)
+    else:
+        charge_capture_df = pd.read_excel(capture_temp_path)
 
-    conpany_roaster = pd.read_excel(roster_temp_path,skiprows=2)
+    # Read roster file
+    if Roster_file_filename.endswith('.csv'):
+        conpany_roaster = pd.read_csv(roster_temp_path)
+    else:
+        conpany_roaster = pd.read_excel(roster_temp_path, skiprows=2)
 
 
     # Get month and report_type from form
