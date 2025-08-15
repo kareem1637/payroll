@@ -16,7 +16,7 @@ from pptx.oxml.xmlchemy import OxmlElement
 
 def get_base_dir():
     if getattr(sys, 'frozen', False):
-        return sys._MEIPASS  # PyInstaller extracts to this temp dir
+        return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
 app = Flask(__name__,
@@ -578,7 +578,10 @@ def download_file(filename):
 # Function to open the default web browser
 import os
 def open_browser():
-    webbrowser.open_new("http://localhost:8000")
+    try:
+        webbrowser.open_new("http://localhost:8000")
+    except Exception as e:
+        print(f"Failed to open browser: {e}")
 
 if __name__ == '__main__':
     # Only open browser in local development

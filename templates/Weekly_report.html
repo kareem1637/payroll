@@ -15,10 +15,46 @@
         .file-upload-box { margin-bottom: 2rem; }
         .puzzle-logo { max-width: 120px; max-height: 120px; border-radius: 18px; box-shadow: 0 2px 12px rgba(0,0,0,0.10); background: #fff; padding: 8px; }
         .dashboard-bg-puzzle { position: absolute; right: 2vw; top: 2vw; opacity: 0.08; z-index: 0; max-width: 300px; pointer-events: none; }
+
+        /* Loading overlay styles */
+        .loading-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0,0,0,0.4);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 9999;
+            transition: opacity 0.2s;
+        }
+        .loading-box {
+            background: #fff;
+            border-radius: 16px;
+            padding: 40px 60px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+            text-align: center;
+        }
+        .loading-spinner {
+            width: 3rem; height: 3rem;
+            border: 0.4rem solid #e0e0e0;
+            border-top: 0.4rem solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 18px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
 <div class="dashboard-container">
+    <div id="loading-overlay" class="loading-overlay" style="display:none;">
+        <div class="loading-box">
+            <div class="loading-spinner"></div>
+            <div class="fw-bold fs-5 mb-1">Processing your data...</div>
+            <div class="text-secondary">Please wait while we generate your report.</div>
+        </div>
+    </div>
     <img src="/static/Puzzle_logo.png" class="dashboard-bg-puzzle" alt="Puzzle Logo Background" />
     <div class="hero-header">
         <img src="/static/Puzzle_logo.png" class="puzzle-logo" alt="Puzzle Logo" />
@@ -39,7 +75,6 @@
             </div>
         </div>
         <div class="row mb-3">
-            <!-- Day field removed from UI, but kept in API via JS -->
             <div class="col-md-6 d-none">
                 <label for="day-field" class="form-label">Day</label>
                 <input class="form-control" type="text" id="day-field" name="day" placeholder="Enter Day">
@@ -88,7 +123,6 @@
 function renderTable(data, tbodyId) {
     const tbody = document.getElementById(tbodyId);
     tbody.innerHTML = '';
-    // Only show scores between 60 and 90 (inclusive)
     data.filter(row => row.score <= 90 && row.score >= 60).forEach(row => {
         const tr = document.createElement('tr');
         tr.innerHTML = `<td>${row.company_roster || ''}</td><td>${row.charge_capture_name || ''}</td><td>${row.score != null ? row.score.toFixed(2) : ''}</td>`;
@@ -112,6 +146,10 @@ form.addEventListener('submit', async function(e) {
     formData.append('captureFile', chargeFile);
     formData.append('day', document.getElementById('day-field').value);
     formData.append('date', document.getElementById('date-field').value);
+
+    // Show loading overlay
+    document.getElementById('loading-overlay').style.display = 'flex';
+
     try {
         const response = await fetch('/upload_data', {
             method: 'POST',
@@ -123,18 +161,15 @@ form.addEventListener('submit', async function(e) {
             renderTable(result.matched_providers, 'matched-table-body');
             renderTable(result.unmatched_providers, 'unmatched-table-body');
             if (result.pptx_path) {
-                // Show download link
                 const downloadDiv = document.createElement('div');
                 downloadDiv.className = 'text-center my-3';
                 downloadDiv.innerHTML = `<a href='/${result.pptx_path}' class='btn btn-success' download>Download PowerPoint Report</a>`;
                 document.getElementById('results-section').appendChild(downloadDiv);
             }
-            // Add note below results section
             const verificationNote = document.getElementById('verification-note');
             if (verificationNote) {
                 verificationNote.style.display = 'block';
             }
-            // Update note to highlight the score range
             const resultsSection = document.getElementById('results-section');
             if (resultsSection) {
                 const noteDiv = document.createElement('div');
@@ -148,6 +183,9 @@ form.addEventListener('submit', async function(e) {
         }
     } catch (err) {
         alert('Error uploading: ' + err.message);
+    } finally {
+        // Hide loading overlay
+        document.getElementById('loading-overlay').style.display = 'none';
     }
 });
 
@@ -155,7 +193,7 @@ document.getElementById('date-field').addEventListener('change', function() {
     const dateValue = this.value;
     if (dateValue) {
         const dateObj = new Date(dateValue);
-        const days = ['Saturday','Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday','Saturday'];
         document.getElementById('day-field').value = days[dateObj.getDay()];
     } else {
         document.getElementById('day-field').value = '';
