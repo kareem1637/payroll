@@ -6,3 +6,6 @@ uploads/
 .env
 .DS_Store
 build/
+*.spec
+
+
