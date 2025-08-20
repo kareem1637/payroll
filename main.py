@@ -1,5 +1,7 @@
 import pandas as pd
 import os
+import requests
+import os
 from flask import Flask, request, jsonify, render_template, send_file
 from werkzeug.utils import secure_filename
 import sys
@@ -23,11 +25,26 @@ def get_base_dir():
 app = Flask(__name__,
             template_folder=os.path.join(get_base_dir(), 'templates'))
 
+
 BASE_DIR = get_base_dir()
 print("Base Directory:", BASE_DIR)
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# --- API Key Security ---
+API_KEY = os.environ.get('API_KEY', 'your-secret-key')
+
+@app.before_request
+def check_api_key():
+    # Allow static files and home page without API key
+    if request.path.startswith('/static') or request.path.startswith('/uploads') or request.path in ['/', '/favicon.ico']:
+        return
+    # Only check for API key on API endpoints
+    if request.path.startswith('/api/'):
+        client_key = request.headers.get('X-API-KEY')
+        if client_key != API_KEY:
+            return jsonify({'error': 'Invalid or missing API key'}), 401
 
 
 from flask import send_from_directory
