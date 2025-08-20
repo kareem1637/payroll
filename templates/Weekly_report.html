@@ -152,9 +152,12 @@ form.addEventListener('submit', async function(e) {
 
     try {
     const response = await fetch('/api/productivity/upload_data', {
-            method: 'POST',
-            body: formData
-        });
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-API-KEY': '0de34eb2-cb58-4f1e-a7b8-2e55cf0e5331'
+        }
+    });
         const result = await response.json();
         if (result.success && result.matched_providers && result.unmatched_providers) {
             document.getElementById('results-section').style.display = 'block';

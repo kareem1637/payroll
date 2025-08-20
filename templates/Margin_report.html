@@ -183,9 +183,12 @@ async function doUpload(saveOnly = false) {
 
     try {
     const response = await fetch('/api/margin/upload_data', {
-            method: 'POST',
-            body: formData
-        });
+        method: 'POST',
+        body: formData,
+        headers: {
+            'X-API-KEY': '0de34eb2-cb58-4f1e-a7b8-2e55cf0e5331'
+        }
+    });
         const result = await response.json();
     if (result.success) {
             // Show matched/unmatched only when not save-only
@@ -278,7 +281,13 @@ document.getElementById('pr-file').addEventListener('change', async function(e) 
     const fd = new FormData();
     fd.append('PRFile', file);
     try {
-    const resp = await fetch('/api/margin/list_pr_sheets', { method: 'POST', body: fd });
+    const resp = await fetch('/api/margin/list_pr_sheets', {
+        method: 'POST',
+        body: fd,
+        headers: {
+            'X-API-KEY': '0de34eb2-cb58-4f1e-a7b8-2e55cf0e5331'
+        }
+    });
         const data = await resp.json();
         if (data.sheets && Array.isArray(data.sheets)) {
             select.innerHTML = '';

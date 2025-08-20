@@ -222,7 +222,10 @@
         try {
             const response = await fetch('/api/ppg/upload_logo', {
                 method: 'POST',
-                body: formData
+                body: formData,
+                headers: {
+                    'X-API-KEY': '0de34eb2-cb58-4f1e-a7b8-2e55cf0e5331'
+                }
             });
             const result = await response.json();
             if (result.success) {
@@ -299,7 +302,10 @@
         try {
             const response = await fetch('/api/ppg/upload_data', {
                 method: 'POST',
-                body: formData
+                body: formData,
+                headers: {
+                    'X-API-KEY': '0de34eb2-cb58-4f1e-a7b8-2e55cf0e5331'
+                }
             });
             if (!response.ok) {
                 document.getElementById('loading-overlay').style.display = 'none';

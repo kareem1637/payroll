@@ -343,6 +343,7 @@
                 loader.updateMessage('Uploading files to server...');
                 const response = await fetch('/api/payroll/process', {
                     method: 'POST',
+                    headers: { 'X-API-KEY': '0de34eb2-cb58-4f1e-a7b8-2e55cf0e5331' },
                     body: formData
                 });
                 // Update loading message for processing
@@ -471,7 +472,10 @@
             try {
                 const response = await fetch('/api/payroll/add_missing_cpt', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-KEY': '0de34eb2-cb58-4f1e-a7b8-2e55cf0e5331'
+                    },
                     body: JSON.stringify({
                         provider,
                         position,
@@ -521,7 +525,8 @@
             try {
                 // Request the file
                 const response = await fetch('/api/payroll/save_changes', {
-                    method: 'POST'
+                    method: 'POST',
+                    headers: { 'X-API-KEY': '0de34eb2-cb58-4f1e-a7b8-2e55cf0e5331' }
                 });
 
                 // Check for server errors
@@ -654,7 +659,10 @@
             try {
                 const response = await fetch('/api/payroll/add_new_cpt_column', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-KEY': '0de34eb2-cb58-4f1e-a7b8-2e55cf0e5331'
+                    },
                     body: JSON.stringify({ cpt: cptCode })
                 });
 
