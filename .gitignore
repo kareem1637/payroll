@@ -7,5 +7,5 @@ uploads/
 .DS_Store
 build/
 *.spec
-
+*.ipynb
 

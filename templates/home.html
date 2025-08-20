@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reports Hub</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" />
+  <style>
+    body { background:#f8f9fa; }
+    .container-narrow { max-width: 980px; margin: 40px auto; }
+    .card-hover { transition: transform .1s ease-in-out, box-shadow .1s; }
+    .card-hover:hover { transform: translateY(-2px); box-shadow: 0 6px 26px rgba(0,0,0,.08); }
+  </style>
+</head>
+<body>
+  <div class="container container-narrow">
+    <div class="text-center mb-4">
+      <img src="/static/Puzzle_logo.png" alt="Logo" style="height:72px" class="mb-2"/>
+      <h2 class="fw-bold">Reports Hub</h2>
+      <p class="text-secondary"></p>
+    </div>
+    <div class="row g-3">
+      <div class="col-md-6">
+        <a href="/margin" class="text-decoration-none">
+          <div class="card card-hover">
+            <div class="card-body">
+              <h5 class="card-title mb-1">Margin Report</h5>
+              <div class="text-secondary small">Upload roster, charges, PR/FDR and generate PPTX + Excel.</div>
+            </div>
+          </div>
+        </a>
+      </div>
+      <div class="col-md-6">
+        <a href="/ppg" class="text-decoration-none">
+          <div class="card card-hover">
+            <div class="card-body">
+              <h5 class="card-title mb-1">PPG Report</h5>
+              <div class="text-secondary small">Corporate/single facility views.</div>
+            </div>
+          </div>
+        </a>
+      </div>
+      <div class="col-md-6">
+        <a href="/weekly" class="text-decoration-none">
+          <div class="card card-hover">
+            <div class="card-body">
+              <h5 class="card-title mb-1">Clinician Productivity Report</h5>
+              <div class="text-secondary small">Clinician Productivity &amp; Efficiency Tracking Report</div>
+            </div>
+          </div>
+        </a>
+      </div>
+      <div class="col-md-6">
+        <a href="/dashboard" class="text-decoration-none">
+          <div class="card card-hover">
+            <div class="card-body">
+              <h5 class="card-title mb-1">Payroll Automation</h5>
+              <div class="text-secondary small">Payroll Automation excel sheet </div>
+            </div>
+          </div>
+        </a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

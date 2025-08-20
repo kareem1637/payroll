@@ -341,7 +341,7 @@
             formData.append('outputFileName', outputFileName);
             try {
                 loader.updateMessage('Uploading files to server...');
-                const response = await fetch('/process', {
+                const response = await fetch('/api/payroll/process', {
                     method: 'POST',
                     body: formData
                 });
@@ -469,7 +469,7 @@
         }
         async function addCPTForPosition(provider, position, cptCode, dos) {
             try {
-                const response = await fetch('/add_missing_cpt', {
+                const response = await fetch('/api/payroll/add_missing_cpt', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -520,7 +520,7 @@
 
             try {
                 // Request the file
-                const response = await fetch('/save_changes', {
+                const response = await fetch('/api/payroll/save_changes', {
                     method: 'POST'
                 });
 
@@ -652,7 +652,7 @@
             }
 
             try {
-                const response = await fetch('/add_new_cpt_column', {
+                const response = await fetch('/api/payroll/add_new_cpt_column', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ cpt: cptCode })

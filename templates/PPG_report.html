@@ -76,9 +76,9 @@
             <div class="text-secondary">Please wait while we process your data.</div>
         </div>
     </div>
-    <img src="\static\Puzzle_logo.png" class="dashboard-bg-puzzle" alt="Puzzle Logo Background" />
+    <img src="/static/Puzzle_logo.png" class="dashboard-bg-puzzle" alt="Puzzle Logo Background" />
     <div class="hero-header">
-        <img src="\static\Puzzle_logo.png" class="puzzle-logo" alt="Puzzle Logo" />
+    <img src="/static/Puzzle_logo.png" class="puzzle-logo" alt="Puzzle Logo" />
         <div>
             <h2 class="mb-1 fw-bold" style="font-size:2.3rem;"><span class="me-2"></span>PBJ Report Dashboard</h2>
         </div>
@@ -220,7 +220,7 @@
         formData.append('logo', file);
         formData.append('corp_name', name);
         try {
-            const response = await fetch('/upload_logo', {
+            const response = await fetch('/api/ppg/upload_logo', {
                 method: 'POST',
                 body: formData
             });
@@ -297,7 +297,7 @@
         // Show loading overlay
         document.getElementById('loading-overlay').style.display = 'flex';
         try {
-            const response = await fetch('/upload_data', {
+            const response = await fetch('/api/ppg/upload_data', {
                 method: 'POST',
                 body: formData
             });

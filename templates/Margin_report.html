@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Margin Report</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <style>
+        body { background: #f8f9fa; }
+        .dashboard-container { width: 80vw; max-width: 1200px; margin: 40px auto; background: #fff; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 32px; position: relative; }
+        .hero-header { display: flex; align-items: center; justify-content: center; gap: 32px; margin-bottom: 2.5rem; }
+        .dashboard-title { font-size:2.3rem; font-weight: bold; }
+        .table-section { margin-top: 2rem; }
+        .table-title { font-size: 1.3rem; font-weight: 600; margin-bottom: 1rem; }
+        .file-upload-box { margin-bottom: 2rem; }
+        .puzzle-logo { max-width: 120px; max-height: 120px; border-radius: 18px; box-shadow: 0 2px 12px rgba(0,0,0,0.10); background: #fff; padding: 8px; }
+        .dashboard-bg-puzzle { position: absolute; right: 2vw; top: 2vw; opacity: 0.08; z-index: 0; max-width: 300px; pointer-events: none; }
+
+        /* Loading overlay styles */
+        .loading-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0,0,0,0.4);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 9999;
+            transition: opacity 0.2s;
+        }
+        .loading-box {
+            background: #fff;
+            border-radius: 16px;
+            padding: 40px 60px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+            text-align: center;
+        }
+        .loading-spinner {
+            width: 3rem; height: 3rem;
+            border: 0.4rem solid #e0e0e0;
+            border-top: 0.4rem solid #007bff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 18px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+<div class="dashboard-container">
+    <div id="loading-overlay" class="loading-overlay" style="display:none;">
+        <div class="loading-box">
+            <div class="loading-spinner"></div>
+            <div class="fw-bold fs-5 mb-1">Processing your data...</div>
+            <div class="text-secondary">Please wait while we generate your report.</div>
+        </div>
+    </div>
+    <img src="/static/Puzzle_logo.png" class="dashboard-bg-puzzle" alt="Puzzle Logo Background" />
+    <div class="hero-header">
+        <img src="/static/Puzzle_logo.png" class="puzzle-logo" alt="Puzzle Logo" />
+        <div class="text-center">
+            <h2 class="dashboard-title">Margin Report</h2>
+            <div class="text-secondary"></div>
+        </div>
+    </div>
+    <form id="upload-form" enctype="multipart/form-data">
+        <div class="row file-upload-box">
+            <div class="col-md-6 mb-3">
+                <label for="roster-file" class="form-label">Company Roster (.csv or .xlsx)</label>
+                <input class="form-control" type="file" id="roster-file" name="Roster" accept=".csv,.xlsx" required>
+            </div>
+            <div class="col-md-6 mb-3">
+                <label for="charge-file" class="form-label">Charge Capture (.csv or .xlsx)</label>
+                <input class="form-control" type="file" id="charge-file" name="captureFile" accept=".csv,.xlsx" required>
+            </div>
+            <div class="col-md-6 mb-3">
+                <label for="pr-file" class="form-label">Payroll Register (PR) (.xls or .xlsx)</label>
+                <input class="form-control" type="file" id="pr-file" name="PRFile" accept=".xls,.xlsx" >
+                <div class="form-text">Select the PR workbook; we'll list available sheets for you to choose.</div>
+            </div>
+            <div class="col-md-6 mb-3">
+                <label for="pr-sheet" class="form-label">Select Payroll Register sheet</label>
+                <select id="pr-sheet-select" class="form-select">
+                    <option value="Payroll Register">Payroll Register</option>
+                </select>
+            </div>
+            <div class="col-md-6 mb-3">
+                <label for="fdr-file" class="form-label">Financial Dashboard Report (.xlsx)</label>
+                <input class="form-control" type="file" id="fdr-file" name="FDRFile" accept=".xlsx" >
+            </div>
+        </div>
+
+            <div class="col-md-6">
+                <label for="date-field" class="form-label">Date</label>
+                <input class="form-control" type="date" id="date-field" name="date" required>
+            </div>
+
+        </div>
+        <div class="text-center">
+            <button type="submit" id="upload-btn" class="btn btn-primary btn-lg px-5">Upload & Match</button>
+        </div>
+    </form>
+    <div id="results-section" style="display:none;">
+        <div class="row justify-content-center">
+            <div class="col-lg-10 col-xl-8" id="results-inner">
+                <!-- Important note will be inserted at the top of this column -->
+                <div class="table-section">
+                    <div class="table-title">Matched Providers</div>
+                    <table class="table table-bordered table-striped">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Company Roster Name</th>
+                                <th>Charge Capture Name</th>
+                                <th>Score</th>
+                            </tr>
+                        </thead>
+                        <tbody id="matched-table-body"></tbody>
+                    </table>
+                </div>
+                <div class="table-section">
+                    <div class="table-title">Unmatched Providers</div>
+                    <table class="table table-bordered table-striped">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Company Roster Name</th>
+                                <th>Charge Capture Name</th>
+                                <th>Score</th>
+                            </tr>
+                        </thead>
+                        <tbody id="unmatched-table-body"></tbody>
+                    </table>
+                </div>
+                <!-- Download buttons will be appended here -->
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+function renderTable(data, tbodyId) {
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    (data || [])
+        .filter(row => typeof row?.score === 'number' ? (row.score <= 90 && row.score >= 60) : true)
+        .forEach(row => {
+            const tr = document.createElement('tr');
+            const company = (row.company_roster ?? row.providers ?? '').toString();
+            const charge = (row.charge_capture_name ?? row.org_providers_name ?? '').toString();
+            const scoreVal = row.score != null && !isNaN(Number(row.score)) ? Number(row.score).toFixed(2) : '';
+            tr.innerHTML = `<td>${company}</td><td>${charge}</td><td>${scoreVal}</td>`;
+            tbody.appendChild(tr);
+        });
+}
+
+const form = document.getElementById('upload-form');
+const uploadBtn = document.getElementById('upload-btn');
+
+async function doUpload(saveOnly = false) {
+    const rosterFile = document.getElementById('roster-file').files[0];
+    const chargeFile = document.getElementById('charge-file').files[0];
+    const prFile = document.getElementById('pr-file').files[0];
+    const fdrFile = document.getElementById('fdr-file').files[0];
+    const dateField = document.getElementById('date-field').value;
+    if (!rosterFile || !chargeFile) {
+        alert('Please upload both files.');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('Roster', rosterFile);
+    formData.append('captureFile', chargeFile);
+    if (prFile) formData.append('PRFile', prFile);
+    if (fdrFile) formData.append('FDRFile', fdrFile);
+    formData.append('date', dateField);
+    // include PR sheet name from the select if present
+    const prSheetSelect = document.getElementById('pr-sheet-select');
+    const prSheetVal = prSheetSelect ? prSheetSelect.value : (document.getElementById('pr-sheet')?.value || 'Payroll Register');
+    if (prSheetVal) formData.append('PR_sheet_name', prSheetVal);
+    if (saveOnly) formData.append('save_workbook', 'true');
+
+    // Show loading overlay
+    document.getElementById('loading-overlay').style.display = 'flex';
+
+    try {
+    const response = await fetch('/api/margin/upload_data', {
+            method: 'POST',
+            body: formData
+        });
+        const result = await response.json();
+    if (result.success) {
+            // Show matched/unmatched only when not save-only
+            if (!saveOnly && result.matched_providers && result.unmatched_providers) {
+                document.getElementById('results-section').style.display = 'block';
+                renderTable(result.matched_providers, 'matched-table-body');
+                renderTable(result.unmatched_providers, 'unmatched-table-body');
+
+        const resultsInner = document.getElementById('results-inner');
+        if (resultsInner) {
+                    let noteDiv = document.getElementById('important-note');
+                    if (!noteDiv) {
+                        noteDiv = document.createElement('div');
+                        noteDiv.id = 'important-note';
+                        noteDiv.className = 'alert alert-warning mt-3';
+                        noteDiv.innerHTML = `
+                            <strong>Important:</strong> The table below only shows provider matches with scores between <b>60 and 90</b>, which are likely to be potential mistakes. Please carefully review these names before using the report. If you find any incorrect matches, update the names in your roster file so they match the charge capture file, then re-upload for best results.`;
+            resultsInner.insertAdjacentElement('afterbegin', noteDiv);
+                    }
+                }
+            }
+
+            // Provide download link(s)
+            // PowerPoint (if present)
+            if (result.pptx_path && !saveOnly) {
+                const pptxDivId = 'pptx-download-div';
+                let existingPptxDiv = document.getElementById(pptxDivId);
+                const resultsInner = document.getElementById('results-inner');
+                if (!existingPptxDiv && resultsInner) {
+                    const downloadDiv = document.createElement('div');
+                    downloadDiv.id = pptxDivId;
+                    downloadDiv.className = 'text-center my-3';
+                    const a = document.createElement('a');
+                    a.href = `/${result.pptx_path}`;
+                    a.className = 'btn btn-success';
+                    a.setAttribute('download', '');
+                    a.textContent = 'Download PowerPoint Report';
+                    downloadDiv.appendChild(a);
+                    resultsInner.appendChild(downloadDiv);
+                } else {
+                    // update existing link if path changed
+                    const a = existingPptxDiv.querySelector('a');
+                    if (a) a.href = `/${result.pptx_path}`;
+                }
+            }
+
+            // Workbook (Excel) - always available after server processes
+            const workbookDivId = 'workbook-download-div';
+            let workbookDiv = document.getElementById(workbookDivId);
+            const resultsInner2 = document.getElementById('results-inner');
+            if (!workbookDiv && resultsInner2) {
+                workbookDiv = document.createElement('div');
+                workbookDiv.id = workbookDivId;
+                workbookDiv.className = 'text-center my-3';
+                const link = document.createElement('a');
+                link.href = '/uploads/Work_book.xlsx';
+                link.className = 'btn btn-outline-success';
+                link.textContent = 'Download Workbook (Excel)';
+                workbookDiv.appendChild(link);
+                resultsInner2.appendChild(workbookDiv);
+            } else {
+                const link = workbookDiv.querySelector('a');
+                if (link) link.href = '/uploads/Work_book.xlsx';
+            }
+            // ensure results section is visible so user can see download
+            document.getElementById('results-section').style.display = 'block';
+        } else {
+            alert('Processing failed or no results returned.');
+        }
+    } catch (err) {
+        alert('Error uploading: ' + err.message);
+    } finally {
+        // Hide loading overlay
+        document.getElementById('loading-overlay').style.display = 'none';
+    }
+}
+
+form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    doUpload(false);
+});
+
+// Save Workbook button removed per request; existing API remains unaffected.
+
+// When a PR file is selected, request available sheet names from server
+document.getElementById('pr-file').addEventListener('change', async function(e) {
+    const file = e.target.files[0];
+    const select = document.getElementById('pr-sheet-select');
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('PRFile', file);
+    try {
+    const resp = await fetch('/api/margin/list_pr_sheets', { method: 'POST', body: fd });
+        const data = await resp.json();
+        if (data.sheets && Array.isArray(data.sheets)) {
+            select.innerHTML = '';
+            for (const s of data.sheets) {
+                const opt = document.createElement('option');
+                opt.value = s;
+                opt.textContent = s;
+                select.appendChild(opt);
+            }
+        } else {
+            // leave default
+        }
+    } catch (err) {
+        console.warn('Could not list PR sheets:', err);
+    }
+});
+
+document.getElementById('date-field').addEventListener('change', function() {
+    const dateValue = this.value;
+});
+</script>
+</body>
+</html>
