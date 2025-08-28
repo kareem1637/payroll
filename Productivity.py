@@ -14,6 +14,11 @@ from pptx.util import  Pt
 from pptx.enum.dml import MSO_FILL
 from pptx.oxml.xmlchemy import OxmlElement
 
+# Define standard font properties for consistent formatting across all slides
+STANDARD_FONT_NAME = "Consolas"
+STANDARD_FONT_SIZE = Pt(10)
+MONOSPACE_FONT_NAME = "Consolas"
+
 def get_base_dir():
     if getattr(sys, 'frozen', False):
         return sys._MEIPASS  # PyInstaller extracts to this temp dir
@@ -78,7 +83,7 @@ def apply_border(cell, edges = ["left", "right", "top", "bottom"], border_color=
     if cell.fill.type == MSO_FILL.SOLID: cell.fill.fore_color.rgb = fill_color
     return(cell)
 
-def duplicate_slide(prs: Presentation, slide_number: int,rows: int):
+def duplicate_slide(prs: Presentation, slide_number: int, rows: int):
     """
     Duplicate a slide, copying only tables (structure and cell colors, no text).
     :param prs: Presentation object.
@@ -108,6 +113,12 @@ def duplicate_slide(prs: Presentation, slide_number: int,rows: int):
             # Ensure header row height matches the source header row height
             new_table.rows[0].height = table.rows[0].height
 
+            # Use the standard font properties defined at module level
+            standard_font_name = STANDARD_FONT_NAME
+            standard_font_size = STANDARD_FONT_SIZE
+            standard_font_bold = False  # Headers should be bold
+            standard_font_italic = False
+
             # Copy the first row (header) exactly
             from pptx.enum.text import MSO_VERTICAL_ANCHOR
             for c in range(cols):
@@ -123,7 +134,7 @@ def duplicate_slide(prs: Presentation, slide_number: int,rows: int):
                         dest_run = dest_cell.text_frame.paragraphs[0].runs[0]
                         dest_run.font.size = src_run.font.size
                         dest_run.font.bold = src_run.font.bold
-                        dest_run.font.name = src_run.font.name
+                        dest_run.font.name = standard_font_name
                         dest_run.font.italic = src_run.font.italic
                         # Only copy RGB color if available, otherwise skip to avoid AttributeError
                         if src_run.font.color and src_run.font.color.type is not None:
@@ -200,7 +211,7 @@ def duplicate_slide(prs: Presentation, slide_number: int,rows: int):
                         dest_run.text = run.text
                         if run.font:
                             dest_font = dest_run.font
-                            dest_font.name = run.font.name
+                            dest_font.name = MONOSPACE_FONT_NAME
                             dest_font.size = run.font.size
                             dest_font.bold = run.font.bold
                             dest_font.italic = run.font.italic
@@ -444,7 +455,7 @@ def build_metadata(charge_capture_df, company_roster_df):
         Region_data.loc[len(Region_data)] = new_row
     unmatched_providers = []
     matched_providers = []
-    Regional_Dashboard=pd.DataFrame(columns=["Region","RDO","RDS","Gross Encounters","Gross Consents","Gross Drafts"])
+    Regional_Dashboard=pd.DataFrame(columns=["Region","clinician","RDS","Gross Encounters","Gross Consents","Gross Drafts"])
 
     for name, group in grouped_CR:
         manager_group=group.groupby('Manager')
@@ -460,7 +471,7 @@ def build_metadata(charge_capture_df, company_roster_df):
             Region_Gross_Drafts = Region_data[Region_data['Clinician'].isin([item['org_providers_name'] for item in result['matched']])]['Drafts'].sum()    
             new_row = {
                 "Region": name,
-                "RDO": manager_name,
+                "clinician": manager_name,
                 "RDS": matched_providers_CC,
                 "Gross Encounters": Region_Gross_Encounters,
                 "Gross Consents": Region_Gross_Consents,
@@ -472,7 +483,7 @@ def build_metadata(charge_capture_df, company_roster_df):
     for row in Regional_Dashboard.itertuples():
         region = row.Region
         Clinician_list = row.RDS
-        manager= row.RDO    
+        manager= row.clinician    
         # Update the 'region' column for all clinicians in the list
         Region_data.loc[Region_data['Clinician'].isin(Clinician_list), 'region'] = region
         Region_data.loc[Region_data['Clinician'].isin(Clinician_list), 'manager'] = manager
@@ -486,6 +497,11 @@ def build_metadata(charge_capture_df, company_roster_df):
 
 
 def generate_pbj_presentation(prs:Presentation,Regional_Dashboard: pd.DataFrame,gouped_CC_ByRegion, day:str, date:str,Add_region=True):
+    
+    # Define standard font properties for consistency
+    STANDARD_FONT_NAME = "Consolas"
+    STANDARD_FONT_SIZE = Pt(10)
+    MONOSPACE_FONT_NAME = "Consolas"
     
     # Split the corporate summary table into slides of 10 facilities each
     Region_per_slide = 5
@@ -502,7 +518,7 @@ def generate_pbj_presentation(prs:Presentation,Regional_Dashboard: pd.DataFrame,
                 from pptx.enum.text import MSO_VERTICAL_ANCHOR
                 for idx, row in enumerate(Regional_Dashboard.iloc[start_idx:end_idx].itertuples()):
                     region = row.Region
-                    RDO = row.RDO
+                    clinician = row.clinician
                     RDS = ', '.join(map(str, row.RDS))  # Convert list to comma-separated string
                     gross_encounters = row.Gross_Encounters
                     gross_consents = row.Gross_Consents
@@ -510,9 +526,8 @@ def generate_pbj_presentation(prs:Presentation,Regional_Dashboard: pd.DataFrame,
                     # Assuming the table has 3 columns: Facility, Clinicians, Hours
                     row_cells = table.rows[idx+1].cells
                     row_cells[0].text = str(region)
-                    row_cells[1].text = str(RDO)
+                    row_cells[1].text = str(clinician)
                     # Split RDS into two columns, pad each provider name to fixed width, and set monospace font
-                    monospace_font = "Consolas"
                     pad_width = 25
                     names = [str(name) if len(str(name)) > pad_width else str(name).ljust(pad_width) for name in row.RDS]
                     col1 = []
@@ -534,16 +549,17 @@ def generate_pbj_presentation(prs:Presentation,Regional_Dashboard: pd.DataFrame,
                     # Set monospace font for all runs in the cell
                     for para in row_cells[2].text_frame.paragraphs:
                         for run in para.runs:
-                            run.font.name = monospace_font
+                            run.font.name = MONOSPACE_FONT_NAME
                     row_cells[3].text = str(gross_encounters)
                     row_cells[4].text = str(gross_consents)
                     row_cells[6].text = str(gross_drafts)
-                    # Set vertical alignment to middle for all cells and all paragraphs in each cell
+                    # Set vertical alignment to middle for all cells and apply uniform Consolas font
                     for cell in row_cells:
                         cell.vertical_anchor = MSO_VERTICAL_ANCHOR.MIDDLE
                         for para in cell.text_frame.paragraphs:
                             for run in para.runs:
                                 run.font.size = fontSize
+                                run.font.name = STANDARD_FONT_NAME
     for region_name , region_data in gouped_CC_ByRegion:
         # --- SPLIT PROVIDERS ACROSS SLIDES BASED ON MAX PROVIDERS ---
         max_providers_per_slide = 7
@@ -566,7 +582,7 @@ def generate_pbj_presentation(prs:Presentation,Regional_Dashboard: pd.DataFrame,
                 if shape.has_table:
                     table = shape.table
                     fontSize = table.cell(0, 0).text_frame.paragraphs[0].runs[0].font.size
-                    font = table.cell(0, 0).text_frame.paragraphs[0].runs[0].font.name
+                    font = MONOSPACE_FONT_NAME
                     from pptx.enum.text import MSO_VERTICAL_ANCHOR
 
                     # Fill only the current chunk of providers
@@ -602,6 +618,7 @@ def generate_pbj_presentation(prs:Presentation,Regional_Dashboard: pd.DataFrame,
                             for para in cell.text_frame.paragraphs:
                                 for run in para.runs:
                                     run.font.size = fontSize
+                                    run.font.name = font
     remove_slide(prs, prs.slides[1])  # Remove the first slide if it's a title slide or not needed
     remove_slide(prs, prs.slides[1])  # Remove the second slide (after first removal, next is at index 1)
 def save_workbook(workbook, filename):
@@ -702,7 +719,7 @@ def upload_data():
    
     include_regions = request.form.get('include_regions',True)
 
-    Regional_Dashboard, unmatched_providers, matched_providers, gouped_CC_ByRegion = build_metadata(charge_capture_df, conpany_roaster)
+    Regional_Dashboard, unmatched_providers, matched_providers, gouped_CC_ByRegion,region_data = build_metadata(charge_capture_df, conpany_roaster)
     prs = load_editable_presentation(os.path.join(BASE_DIR, 'static', 'Weekly Report Example.pptx'), day= day, Date=date)
     generate_pbj_presentation(prs, Regional_Dashboard, gouped_CC_ByRegion, day, date, Add_region=include_regions)
     output_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Weekly_report_report.pptx')
@@ -710,7 +727,7 @@ def upload_data():
     prs.save(output_path)
     # Save Margin_df to Excel
     print("Saving workbook to:", workBook_path)
-    save_workbook(gouped_CC_ByRegion, workBook_path)
+    save_workbook(region_data, workBook_path)
     # Optionally, return download link or status
     # Return the relative path for the frontend to use in download URL
     return jsonify({

@@ -34,18 +34,18 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # --- API Key Security ---
-API_KEY = os.environ.get('API_KEY', 'your-secret-key')
+# API_KEY = os.environ.get('API_KEY', 'your-secret-key')
 
-@app.before_request
-def check_api_key():
-    # Allow static files and home page without API key
-    if request.path.startswith('/static') or request.path.startswith('/uploads') or request.path in ['/', '/favicon.ico']:
-        return
-    # Only check for API key on API endpoints
-    if request.path.startswith('/api/'):
-        client_key = request.headers.get('X-API-KEY')
-        if client_key != API_KEY:
-            return jsonify({'error': 'Invalid or missing API key'}), 401
+# @app.before_request
+# def check_api_key():
+#     # Allow static files and home page without API key
+#     if request.path.startswith('/static') or request.path.startswith('/uploads') or request.path in ['/', '/favicon.ico']:
+#         return
+#     # Only check for API key on API endpoints
+#     if request.path.startswith('/api/'):
+#         client_key = request.headers.get('X-API-KEY')
+#         if client_key != API_KEY:
+#             return jsonify({'error': 'Invalid or missing API key'}), 401
 
 
 from flask import send_from_directory
@@ -435,7 +435,7 @@ def api_productivity_upload_data():
     date = request.form.get('date')
     include_regions = request.form.get('include_regions', True)
 
-    Regional_Dashboard, unmatched_providers, matched_providers, gouped_CC_ByRegion, _ = PROD_MOD.build_metadata(charge_capture_df, company_roster_df)
+    Regional_Dashboard, unmatched_providers, matched_providers, gouped_CC_ByRegion, excel_data = PROD_MOD.build_metadata(charge_capture_df, company_roster_df)
     prs = PROD_MOD.load_editable_presentation(os.path.join(BASE_DIR, 'static', 'Weekly Report Example.pptx'), day=day, Date=date)
     PROD_MOD.generate_pbj_presentation(prs, Regional_Dashboard, gouped_CC_ByRegion, day, date, Add_region=include_regions)
     output_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Weekly_report_report.pptx')
@@ -443,7 +443,7 @@ def api_productivity_upload_data():
     # Also save an Excel workbook for download (mirrors Margin behavior)
     try:
         workBook_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Work_book.xlsx')
-        PROD_MOD.save_workbook(Regional_Dashboard, workBook_path)
+        PROD_MOD.save_workbook(excel_data, workBook_path)
     except Exception as _e:
         # Non-fatal; continue if workbook save fails
         pass
