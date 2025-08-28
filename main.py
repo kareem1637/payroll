@@ -3,6 +3,7 @@ import os
 import requests
 import os
 from flask import Flask, request, jsonify, render_template, send_file
+import time
 from werkzeug.utils import secure_filename
 import sys
 import threading
@@ -33,26 +34,123 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # --- API Key Security ---
-API_KEY = os.environ.get('API_KEY', 'your-secret-key')
+# API_KEY = os.environ.get('API_KEY', 'your-secret-key')
 
-@app.before_request
-def check_api_key():
-    # Allow static files and home page without API key
-    if request.path.startswith('/static') or request.path.startswith('/uploads') or request.path in ['/', '/favicon.ico']:
-        return
-    # Only check for API key on API endpoints
-    if request.path.startswith('/api/'):
-        client_key = request.headers.get('X-API-KEY')
-        if client_key != API_KEY:
-            return jsonify({'error': 'Invalid or missing API key'}), 401
+# @app.before_request
+# def check_api_key():
+#     # Allow static files and home page without API key
+#     if request.path.startswith('/static') or request.path.startswith('/uploads') or request.path in ['/', '/favicon.ico']:
+#         return
+#     # Only check for API key on API endpoints
+#     if request.path.startswith('/api/'):
+#         client_key = request.headers.get('X-API-KEY')
+#         if client_key != API_KEY:
+#             return jsonify({'error': 'Invalid or missing API key'}), 401
 
 
 from flask import send_from_directory
 
+# Opportunistic cleanup: remove stale files in uploads
+def purge_old_uploads(max_age_seconds: int = 60 * 60):  # 1 hour default
+    try:
+        now = time.time()
+        root = os.path.abspath(app.config['UPLOAD_FOLDER'])
+        for dirpath, _, filenames in os.walk(root):
+            for fname in filenames:
+                fpath = os.path.abspath(os.path.join(dirpath, fname))
+                # Safety: ensure path stays within uploads
+                if not fpath.startswith(root):
+                    continue
+                try:
+                    st = os.stat(fpath)
+                    if now - st.st_mtime > max_age_seconds:
+                        os.remove(fpath)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
 # Serve files from the uploads directory
 @app.route('/uploads/<path:filename>')
 def download_file(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'], filename, as_attachment=True)
+    # Opportunistic purge on access
+    purge_old_uploads()
+    # Serve the file
+    response = send_from_directory(app.config['UPLOAD_FOLDER'], filename, as_attachment=True)
+
+    # If requested, delete the file after streaming completes
+    delete_flag = (request.args.get('delete') or '').lower() in ('1', 'true', 'yes')
+    if delete_flag:
+        uploads_root = os.path.abspath(app.config['UPLOAD_FOLDER'])
+        # Resolve and validate path to avoid escaping uploads dir
+        target_path = os.path.abspath(os.path.join(uploads_root, filename))
+        if target_path.startswith(uploads_root):
+            def _remove_file_later():
+                try:
+                    if os.path.exists(target_path):
+                        os.remove(target_path)
+                except Exception:
+                    pass
+            try:
+                response.call_on_close(_remove_file_later)
+            except Exception:
+                # Fallback: attempt immediate removal (risk of partial download)
+                _remove_file_later()
+    return response
+
+# Manual delete endpoint for files in the uploads directory
+@app.route('/api/uploads/delete', methods=['POST'])
+def api_delete_uploads():
+    """
+    Delete one or more files from the uploads directory.
+    Body JSON supports either:
+      { "filename": "file.ext" }
+      or
+      { "filenames": ["file1.ext", "file2.ext"] }
+    Only files within the configured uploads folder are eligible.
+    """
+    # Opportunistic purge first
+    purge_old_uploads()
+
+    data = request.get_json(silent=True) or {}
+    filenames = []
+    if isinstance(data.get('filenames'), list):
+        filenames = [f for f in data.get('filenames') if isinstance(f, str) and f]
+    elif isinstance(data.get('filename'), str) and data.get('filename'):
+        filenames = [data.get('filename')]
+
+    if not filenames:
+        return jsonify({
+            'success': False,
+            'error': 'Provide "filename" or "filenames" in request body.'
+        }), 400
+
+    uploads_root = os.path.abspath(app.config['UPLOAD_FOLDER'])
+    deleted = []
+    not_found = []
+    failed = {}
+
+    for name in filenames:
+        try:
+            # Resolve and validate path stays within uploads
+            target_path = os.path.abspath(os.path.join(uploads_root, name))
+            if not target_path.startswith(uploads_root):
+                failed[name] = 'Invalid path'
+                continue
+            if os.path.exists(target_path):
+                os.remove(target_path)
+                deleted.append(name)
+            else:
+                not_found.append(name)
+        except Exception as e:
+            failed[name] = str(e)
+
+    return jsonify({
+        'success': len(failed) == 0,
+        'deleted': deleted,
+        'not_found': not_found,
+        'failed': failed
+    })
 
 # Function to open the default web browser
 import os
@@ -132,6 +230,7 @@ def page_dashboard():
 # --- Namespaced APIs: Margin ---
 @app.route('/api/margin/list_pr_sheets', methods=['POST'])
 def api_margin_list_pr_sheets():
+    purge_old_uploads()
     if 'PRFile' not in request.files:
         return jsonify({'error': 'No PRFile provided'}), 400
     pr_file = request.files['PRFile']
@@ -159,6 +258,7 @@ def api_margin_list_pr_sheets():
 
 @app.route('/api/margin/upload_data', methods=['POST'])
 def api_margin_upload_data():
+    purge_old_uploads()
     if MARGIN_MOD is None:
         return jsonify({'error': 'Margin module not available'}), 500
     if 'Roster' not in request.files or 'captureFile' not in request.files:
@@ -186,11 +286,8 @@ def api_margin_upload_data():
     # Require PR and FDR for this workflow
     if not PR_file_filename or not FDR_file_filename:
         return jsonify({'error': 'PRFile (.xls) and FDRFile (.xlsx) are required'}), 400
-    if not PR_ext.endswith('.xls'):
-        return jsonify({'error': 'Invalid PR file type, please upload with .xls extension'}), 400
-    if not FDR_ext.endswith('.xlsx'):
-        return jsonify({'error': 'Invalid FDR file type, please upload with .xlsx extension'}), 400
 
+ 
     capture_temp_path = os.path.join(app.config['UPLOAD_FOLDER'], capture_file_filename)
     roster_temp_path = os.path.join(app.config['UPLOAD_FOLDER'], Roster_file_filename)
     PR_temp_path = os.path.join(app.config['UPLOAD_FOLDER'], PR_file_filename)
@@ -199,16 +296,24 @@ def api_margin_upload_data():
     Roster_file.save(roster_temp_path)
     PR_file.save(PR_temp_path)
     FDR_file.save(FDR_temp_path)
-
+    if FDR_file_filename:
+        if FDR_ext.endswith('.xlsx'):
+            FDR_df = pd.read_excel(FDR_temp_path)
+        else:
+            return jsonify({'error': 'Invalid FDR file type plase upload with xlsx extension'}), 400
+        # Read PR file if provided
+    if PR_file_filename:
+        if PR_ext.endswith('.xls'):
+            PR_df = pd.read_excel(PR_temp_path,sheet_name=PR_sheet_name,header=None)
+            PR_df, FDR_df = MARGIN_MOD.preprocess_PR_FDR_xls(PR_df, FDR_df)
+        elif PR_ext.endswith('.xlsx'):
+            PR_df=pd.read_excel("D:\payroll\Payroll History (18) (1).xlsx")
+            PR_df, FDR_df = MARGIN_MOD.preprocess_PR_FDR_xlsx(PR_df, FDR_df)
+        else:
+            return jsonify({'error': 'Invalid PR file type plase upload with xls extension'}), 400
     # Read capture & roster
     charge_capture_df = pd.read_csv(capture_temp_path) if capture_file_filename.endswith('.csv') else pd.read_excel(capture_temp_path)
     company_roaster = pd.read_csv(roster_temp_path) if Roster_file_filename.endswith('.csv') else pd.read_excel(roster_temp_path, skiprows=2)
-    # Read PR & FDR
-    PR_df = pd.read_excel(PR_temp_path, sheet_name=PR_sheet_name, header=None)
-    FDR_df = pd.read_excel(FDR_temp_path)
-
-    # Process via margin module
-    PR_df, FDR_df = MARGIN_MOD.preprocess_PR_FDR(PR_df, FDR_df)
     Regional_Dashboard, unmatched_providers, matched_providers, grouped_CC_ByRegion, Margin_df = MARGIN_MOD.build_metadata(
         charge_capture_df, company_roaster, PR_df, FDR_df
     )
@@ -229,6 +334,7 @@ def api_margin_upload_data():
 # --- Namespaced APIs: PBJ/PPG ---
 @app.route('/api/ppg/upload_data', methods=['POST'])
 def api_ppg_upload_data():
+    purge_old_uploads()
     if PBJ_MOD is None:
         return jsonify({'error': 'PPG/PBJ module not available'}), 500
     if 'file' not in request.files:
@@ -280,6 +386,7 @@ def api_ppg_upload_data():
 
 @app.route('/api/ppg/upload_logo', methods=['POST'])
 def api_ppg_upload_logo():
+    purge_old_uploads()
     if PBJ_MOD is None:
         return jsonify({'error': 'PPG/PBJ module not available'}), 500
     if 'logo' not in request.files or 'corp_name' not in request.form:
@@ -300,6 +407,7 @@ def api_ppg_upload_logo():
 # --- Namespaced APIs: Productivity ---
 @app.route('/api/productivity/upload_data', methods=['POST'])
 def api_productivity_upload_data():
+    purge_old_uploads()
     if PROD_MOD is None:
         return jsonify({'error': 'Productivity module not available'}), 500
     if 'Roster' not in request.files or 'captureFile' not in request.files:
@@ -332,6 +440,13 @@ def api_productivity_upload_data():
     PROD_MOD.generate_pbj_presentation(prs, Regional_Dashboard, gouped_CC_ByRegion, day, date, Add_region=include_regions)
     output_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Weekly_report_report.pptx')
     prs.save(output_path)
+    # Also save an Excel workbook for download (mirrors Margin behavior)
+    try:
+        workBook_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Work_book.xlsx')
+        PROD_MOD.save_workbook(Regional_Dashboard, workBook_path)
+    except Exception as _e:
+        # Non-fatal; continue if workbook save fails
+        pass
     # Map keys to match Weekly_report.html expectations
     def _map_rows(rows):
         out = []
@@ -354,7 +469,19 @@ def api_payroll_process():
     payroll_file = request.files['payrollFile']
     capture_file = request.files['captureFile']
     payroll_sheet = request.form.get('payrollSheet')
+    date_range = request.form.get('dateRange')
     output_filename = request.form.get('outputFileName', 'processed_payroll.xlsx')
+
+    if not payroll_sheet:
+        return jsonify({'error': 'Payroll sheet name is required'}), 400
+
+    if not date_range:
+        return jsonify({'error': 'Date range is required (format: MM.DD.YY-MM.DD.YY)'}), 400
+
+    # Validate date range format
+    import re
+    if not re.match(r'^\d{2}\.\d{2}\.\d{2}-\d{2}\.\d{2}\.\d{2}$', date_range):
+        return jsonify({'error': 'Invalid date range format. Use MM.DD.YY-MM.DD.YY (e.g., 08.01.25-08.14.25)'}), 400
 
     payroll_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(payroll_file.filename or f"payroll_{threading.get_ident()}.xlsx"))
     capture_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(capture_file.filename or f"capture_{threading.get_ident()}.xlsx"))
@@ -362,7 +489,7 @@ def api_payroll_process():
     capture_file.save(capture_path)
 
     try:
-        results = PAYROLL_MOD.process_files(payroll_path, capture_path, payroll_sheet, output_filename)
+        results = PAYROLL_MOD.process_files(payroll_path, capture_path, payroll_sheet, output_filename, date_range)
         invalid_cpts_array = [
             {"name": codes.get("name"), "found": {k: v for k, v in codes.items() if k != "name"}}
             for _, codes in results.get('invalid_cpts', {}).items()

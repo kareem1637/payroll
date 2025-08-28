@@ -213,7 +213,7 @@ async function doUpload(saveOnly = false) {
 
             // Provide download link(s)
             // PowerPoint (if present)
-            if (result.pptx_path && !saveOnly) {
+        if (result.pptx_path && !saveOnly) {
                 const pptxDivId = 'pptx-download-div';
                 let existingPptxDiv = document.getElementById(pptxDivId);
                 const resultsInner = document.getElementById('results-inner');
@@ -222,16 +222,19 @@ async function doUpload(saveOnly = false) {
                     downloadDiv.id = pptxDivId;
                     downloadDiv.className = 'text-center my-3';
                     const a = document.createElement('a');
-                    a.href = `/${result.pptx_path}`;
+            a.href = `/${result.pptx_path}?delete=1`;
                     a.className = 'btn btn-success';
                     a.setAttribute('download', '');
                     a.textContent = 'Download PowerPoint Report';
                     downloadDiv.appendChild(a);
                     resultsInner.appendChild(downloadDiv);
+                    // auto-delete after download click (quiet)
+                    attachAutoDelete(a, ['Margin_Report.pptx']);
                 } else {
                     // update existing link if path changed
                     const a = existingPptxDiv.querySelector('a');
-                    if (a) a.href = `/${result.pptx_path}`;
+            if (a) a.href = `/${result.pptx_path}?delete=1`;
+                    attachAutoDelete(a, ['Margin_Report.pptx']);
                 }
             }
 
@@ -244,17 +247,37 @@ async function doUpload(saveOnly = false) {
                 workbookDiv.id = workbookDivId;
                 workbookDiv.className = 'text-center my-3';
                 const link = document.createElement('a');
-                link.href = '/uploads/Work_book.xlsx';
+                link.href = '/uploads/Work_book.xlsx?delete=1';
                 link.className = 'btn btn-outline-success';
                 link.textContent = 'Download Workbook (Excel)';
                 workbookDiv.appendChild(link);
                 resultsInner2.appendChild(workbookDiv);
+                // auto-delete after download click (quiet)
+                attachAutoDelete(link, ['Work_book.xlsx']);
             } else {
                 const link = workbookDiv.querySelector('a');
-                if (link) link.href = '/uploads/Work_book.xlsx';
+                if (link) link.href = '/uploads/Work_book.xlsx?delete=1';
+                attachAutoDelete(link, ['Work_book.xlsx']);
             }
             // ensure results section is visible so user can see download
             document.getElementById('results-section').style.display = 'block';
+
+                // Add a manual cleanup button (deduped)
+                const cleanupDivId = 'cleanup-div';
+                let cleanupDiv = document.getElementById(cleanupDivId);
+                const resultsInner3 = document.getElementById('results-inner');
+                if (!cleanupDiv && resultsInner3) {
+                    cleanupDiv = document.createElement('div');
+                    cleanupDiv.id = cleanupDivId;
+                    cleanupDiv.className = 'text-center my-2';
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'btn btn-outline-danger btn-sm';
+                    btn.textContent = 'Delete generated files';
+                    btn.onclick = () => deleteGenerated(['Margin_Report.pptx', 'Work_book.xlsx']);
+                    cleanupDiv.appendChild(btn);
+                    resultsInner3.appendChild(cleanupDiv);
+                }
         } else {
             alert('Processing failed or no results returned.');
         }
@@ -308,6 +331,50 @@ document.getElementById('pr-file').addEventListener('change', async function(e) 
 document.getElementById('date-field').addEventListener('change', function() {
     const dateValue = this.value;
 });
+
+// Helper to delete generated files via API
+async function deleteGenerated(files) {
+    try {
+        const resp = await fetch('/api/uploads/delete', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-API-KEY': '0de34eb2-cb58-4f1e-a7b8-2e55cf0e5331'
+            },
+            body: JSON.stringify({ filenames: files })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || data.success === false) {
+            alert('Delete failed' + (data.error ? `: ${data.error}` : '.'));
+        } else {
+            const msg = `Deleted: ${(data.deleted||[]).join(', ') || 'none'}\nNot found: ${(data.not_found||[]).join(', ') || 'none'}`;
+            alert(msg);
+        }
+    } catch (e) {
+        alert('Delete error: ' + e.message);
+    }
+}
+
+// Quiet auto-delete on click, delayed to allow download to start
+function attachAutoDelete(anchor, files) {
+    if (!anchor || anchor.__autoDeleteAttached) return;
+    anchor.__autoDeleteAttached = true;
+    anchor.addEventListener('click', () => {
+        setTimeout(() => autoDeleteGenerated(files), 1500);
+    });
+}
+async function autoDeleteGenerated(files) {
+    try {
+        await fetch('/api/uploads/delete', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-API-KEY': '0de34eb2-cb58-4f1e-a7b8-2e55cf0e5331'
+            },
+            body: JSON.stringify({ filenames: files })
+        });
+    } catch (_) { /* ignore */ }
+}
 </script>
 </body>
 </html>

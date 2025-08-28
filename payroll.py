@@ -19,6 +19,7 @@ import webbrowser
 import logging # Good practice for logging errors
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 from datetime import datetime
+from werkzeug.utils import secure_filename
 CPT_REGEX = re.compile(r'^993\d{2}$')
 # Global variables (declared here for scope)
 provider_cpt_dict = {}
@@ -43,7 +44,7 @@ week2_encounters_col_idx=None
 manual_cpt_updates = []
 weekly_counts=pd.DataFrame()
 processing_warnings = [] # IMPORTANT: Reset the warnings list here
-date_range=""
+date_range="" # Store the date range for use in other functions
 def get_base_dir():
     if getattr(sys, 'frozen', False):
         return sys._MEIPASS  # PyInstaller extracts to this temp dir
@@ -81,12 +82,137 @@ def remove_cpt_from_providers(data_dict, cpt_to_remove):
         if new_cpt_counts:
             updated_dict[provider] = new_cpt_counts
     return updated_dict
+def _norm(s: str) -> str:
+    s = str(s).lower().strip()
+    s = re.sub(r"[^\w\s'-]", " ", s)
+    s = s.replace("-", " ")
+    s = re.sub(r"\s+", " ", s)
+    return s
 
+def _parse_name(s: str):
+    s = _norm(s)
+    parts = s.split()
+    if not parts:
+        return {"first":"", "middles":[], "last":"", "tokens":set()}
+    prefixes = {"dr","mr","mrs","ms","miss"}
+    suffixes = {"jr","sr","ii","iii","iv"}
+    parts = [p for p in parts if p not in prefixes|suffixes]
+    if not parts:
+        return {"first":"", "middles":[], "last":"", "tokens":set()}
+    first = parts[0]
+    last = parts[-1] if len(parts) > 1 else ""
+    middles = parts[1:-1] if len(parts) > 2 else []
+    return {"first": first, "middles": middles, "last": last, "tokens": set(parts)}
+
+def _first_match_score(a_first: str, b_first: str) -> float:
+    if not a_first or not b_first:
+        return 0.0
+    a_first = a_first.strip().lower()
+    b_first = b_first.strip().lower()
+    # initial vs full name
+    if a_first[0] == b_first[0] and (len(a_first) == 1 or len(b_first) == 1):
+        return 95.0
+    # fallback similarity
+    return float(fuzz.ratio(a_first, b_first))
+
+def _last_match_score(a_last: str, b_last: str) -> float:
+    if not a_last or not b_last:
+        return 0.0
+    a = a_last.replace("'", "")
+    b = b_last.replace("'", "")
+    return float(max(fuzz.ratio(a, b), fuzz.token_sort_ratio(a, b)))
+
+def name_similarity(a: str, b: str, *, score_cutoff: float = 0.0) -> float:
+    pa, pb = _parse_name(a), _parse_name(b)
+    last = _last_match_score(pa["last"], pb["last"])
+    if last < 75:
+        return 0.0
+    first = _first_match_score(pa["first"], pb["first"])
+    middle = 0.0
+    if pa["middles"] and pb["middles"]:
+        middle = float(fuzz.token_set_ratio(" ".join(pa["middles"]), " ".join(pb["middles"])))
+    full = float(fuzz.token_set_ratio(_norm(a), _norm(b)))
+    weighted = 0.7*last + 0.25*first + 0.05*middle
+    score = max(weighted, full if last >= 85 else weighted)
+    return score if score >= score_cutoff else 0.0
+
+def match_providers(providers, org_providers, threshold=76):
+    matched = []
+    unmatched_map = {}  # providers_norm -> best unmatched
+
+    matched_providers_set = set()  # to avoid re-matching same provider
+    already_matched_org_providers_names = set()
+
+    providers_map = { _norm(p): p for p in providers }
+    org_providers_map = { _norm(p): p for p in org_providers }
+    comp_norm = list(providers_map.keys())
+    cap_norm = list(org_providers_map.keys())
+
+    def last_token(s):
+        parts = _norm(s).split()
+        return parts[-1] if parts else ""
+
+    # simple blocking
+    cap_by_last, cap_by_initial = {}, {}
+    for n in cap_norm:
+        lt = last_token(n)
+        cap_by_last.setdefault(lt, []).append(n)
+        cap_by_initial.setdefault(lt[:1], []).append(n)
+
+    for cr in comp_norm:
+        original_cr = providers_map[cr]
+        if original_cr in matched_providers_set:
+            continue
+
+        best_name = None
+        best_score = -1.0
+        matched_here = False
+
+        for current_threshold in range(90, threshold - 1, -5):
+            lt = last_token(cr)
+            cand = set(cap_by_last.get(lt, [])) | set(cap_by_initial.get(lt[:1], []))
+            if not cand:
+                cand = set(cap_norm)
+            cand = [c for c in cand if c not in already_matched_org_providers_names]
+            if not cand:
+                continue
+
+            best = process.extractOne(cr, cand, scorer=name_similarity)
+            if best is None:
+                continue
+
+            match_name, score, _ = best
+            score = float(score)
+
+            if score > best_score:
+                best_score = score
+                best_name = match_name
+
+            if score >= current_threshold:
+                matched.append({
+                    'charge_capture_name': original_cr,
+                    'payroll_name': org_providers_map[match_name],
+                    'score': score
+                })
+                matched_providers_set.add(original_cr)
+                already_matched_org_providers_names.add(match_name)
+                matched_here = True
+                break
+
+        if not matched_here:
+            unmatched_map[cr] = {
+                'charge_capture_name': original_cr,
+                'payroll_name': org_providers_map[best_name] if best_name and best_score > 0 else None,
+                'score': best_score if best_score > 0 else 0.0
+            }
+
+    unmatched = sorted(unmatched_map.values(), key=lambda x: x['score'], reverse=True)
+    return {"matched": matched, "unmatched": unmatched}
 # function for saftey 
 def reset_global_variables():
     global provider_cpt_dict, not_recognized, current_workbook, sheet, payroll_df, common_providers, \
            practitioner_list, cpt_positions, start_row, row_end, merged_cells, capture_df, \
-           Gross_encounters_col, manual_cpt_updates ,weekly_counts,week1_encounters_col_idx,week2_encounters_col_idx# Add manual_cpt_updates here
+           Gross_encounters_col, manual_cpt_updates, weekly_counts, week1_encounters_col_idx, week2_encounters_col_idx, date_range
     provider_cpt_dict = {}
     not_recognized = {}
     current_workbook = None
@@ -100,12 +226,12 @@ def reset_global_variables():
     merged_cells = None
     capture_df = None
     Gross_encounters_col = None
-    manual_cpt_updates = [] # Reset it here
-    weekly_counts = None
+    manual_cpt_updates = []  # Reset it here
+    weekly_counts = pd.DataFrame()  # Initialize as empty DataFrame instead of None
     processing_warnings = []
-    week1_encounters_col_idx=None
-    week2_encounters_col_idx=None
-    date_range=""
+    week1_encounters_col_idx = None
+    week2_encounters_col_idx = None
+    date_range = ""
 # extarct providers from payroll
 def extract_practitioners(df, start_row=3, stop_row=102):
     practitioners = []
@@ -138,18 +264,17 @@ def find_header_and_cpt_positions(df):
 
     start_col = start_match[0]['col']
     end_col = end_match[0]['col']
+    
     for i, row in df.iterrows():
-
-
         cpt_positions = {}
         # Iterate through columns between the determined start and end columns
-        for idx in range(start_col + 1, end_col): # start_col + 1 to exclude the 'Encounter Pay Model' column itself
+        for idx in range(start_col + 1, end_col):  # start_col + 1 to exclude the 'Encounter Pay Model' column itself
             value = row.iloc[idx]
             str_val = str(value).strip()
 
             # Check if the value is not NaN and is a non-empty string
             # Also, add a basic regex check for CPT-like format (e.g., "993xx") to be more robust
-            if pd.notna(value) and str_val and re.match(r'^\d{5}$', str_val): # Basic check for 5 digits for a CPT
+            if pd.notna(value) and str_val and re.match(r'^\d{5}$', str_val):  # Basic check for 5 digits for a CPT
                 cpt_positions[str_val] = idx
 
         # If we found at least one potential CPT code in this row, assume it's the header row
@@ -428,8 +553,11 @@ def apply_manual_cpt_updates():
         update_cpt_counts(provider_cpt_dict, provider, cpt)
     logging.info("Manual CPT updates applied.")
 #  process the sheet (payroll , and capture sheet), first function to init most of the global varibales 
-def process_files(payroll_path, capture_path, payroll_sheet,output_filename):
+def process_files(payroll_path, capture_path, payroll_sheet, output_filename, date_range_param):
     reset_global_variables()
+    # Set the global date_range from parameter
+    global date_range
+    date_range = date_range_param  # Assign parameter to global variable
     # execel sheet
     global current_workbook,sheet
     # data structure
@@ -437,13 +565,12 @@ def process_files(payroll_path, capture_path, payroll_sheet,output_filename):
     # table boundaries
     global  start_row,row_end,merged_cells,Gross_encounters_col,week1_encounters_col_idx,week2_encounters_col_idx
     # orignal data frames
-    global payroll_df, capture_df,cpt_counts,date_range
+    global payroll_df, capture_df,cpt_counts
     # Load data
     # --- Load Payroll File ---
-    date_range=payroll_sheet
     try:
         payroll_df = pd.read_excel(payroll_path, sheet_name=payroll_sheet)
-        logging.info(f"Successfully loaded payroll file: {payroll_path}, sheet: {payroll_sheet}")
+        logging.info(f"Successfully loaded payroll file: {payroll_path}, sheet: {payroll_sheet}, date range: {date_range_param}")
     except ValueError as e:
         msg = f"Invalid payroll sheet name or sheet not found: '{payroll_sheet}'. Please check the sheet name and try again. Details: {e}"
         logging.error(msg, exc_info=True)
@@ -535,7 +662,7 @@ def process_files(payroll_path, capture_path, payroll_sheet,output_filename):
     charge_capture_providers = {name: name for name in capture_df["Provider"].unique()}
 
     try:
-        weekly_counts=get_weekly_counts(capture_df.copy(), payroll_sheet) # Pass a copy to avoid modifying original df
+        weekly_counts = get_weekly_counts(capture_df.copy(), date_range_param)  # Pass a copy to avoid modifying original df
         if isinstance(weekly_counts, str):
         # Raise exception if function returned a message instead of a DataFrame
             raise ValueError(f"{weekly_counts} This might indicate that "\
@@ -545,11 +672,11 @@ def process_files(payroll_path, capture_path, payroll_sheet,output_filename):
 
     except ValueError as e:
         logging.error(f"Error in weekly counts calculation: {e}")
-        raise e # Re-raise to be caught by the Flask route
-    except TypeError as e: # Catch TypeError if get_weekly_counts returned a non-DataFrame and it wasn't caught inside
+        raise e  # Re-raise to be caught by the Flask route
+    except TypeError as e:  # Catch TypeError if get_weekly_counts returned a non-DataFrame and it wasn't caught inside
         logging.critical(f"Critical Type Error: Weekly counts is not a DataFrame. {e}", exc_info=True)
         processing_warnings.append(f"Critical Internal Error: Weekly counts data is corrupted. Please report this. Details: {e}")
-        weekly_counts = pd.DataFrame()
+        weekly_counts = pd.DataFrame(columns=['Provider', 'Week_Label', 'CPT_Code', 'Count'])
         raise e
     except Exception as e:
         logging.error(f"An unexpected error occurred during weekly counts calculation: {e}")
@@ -558,24 +685,7 @@ def process_files(payroll_path, capture_path, payroll_sheet,output_filename):
     common_providers = []
     only_in_Pay_roll_providers = []
     Gross_encounters_col = ((find_cell_matches(payroll_df, "Gross Encounters"))[0]['col'])
-    # Compare with fuzzy matching
-    for payroll_name in Pay_roll_providers:
-        match_name, score, _ = process.extractOne(
-            payroll_name,
-            list(charge_capture_providers.keys()),
-            scorer=fuzz.ratio
-        )
-
-        if score < 76:
-            only_in_Pay_roll_providers.append(payroll_name)
-        else:
-            # if score < 100:
-            #     print("✅ Matched:", payroll_name, "↔", match_name, "Score:", score)
-            common_providers.append({
-                'payroll_name': payroll_name,
-                'charge_capture_name': match_name,
-                'score': score  # optional: helps with debugging
-            })
+    match_results = match_providers(charge_capture_providers, Pay_roll_providers)
     cpt_counts = capture_df.groupby(['Provider', 'CPT Codes']).size().reset_index(name='Counts')
     if not provider_cpt_dict :
         process_cpt_counts(cpt_counts,cpt_positions)
@@ -591,19 +701,22 @@ def process_files(payroll_path, capture_path, payroll_sheet,output_filename):
     
     print("done and saved")
 
-    missing_providers  = []
-    for provider in capture_df['Provider'][capture_df['CPT Codes'].isna()].unique():
-        # Create mask for current provider with missing CPT codes
-        mask = (capture_df['Provider'] == provider) & capture_df['CPT Codes'].isna()
-        # Get positions and DOS values
-        positions = capture_df.index[mask].tolist()
-        dos_values = capture_df.loc[mask, 'DOS'].tolist()
-        # Append dictionary to result list
-        missing_providers.append({
-            'provider': provider,
-            'positions': positions,
-            'DOS': dos_values
-        })
+    missing_providers = []
+    if capture_df is not None and 'CPT Codes' in capture_df.columns and 'Provider' in capture_df.columns:
+        for provider in capture_df[capture_df['CPT Codes'].isna()]['Provider'].unique():
+            if pd.isna(provider):
+                continue
+            # Create mask for current provider with missing CPT codes
+            mask = (capture_df['Provider'] == provider) & capture_df['CPT Codes'].isna()
+            # Get positions and DOS values
+            positions = capture_df.index[mask].tolist()
+            dos_values = capture_df.loc[mask, 'DOS'].tolist() if 'DOS' in capture_df.columns else []
+            # Append dictionary to result list
+            missing_providers.append({
+                'provider': str(provider),
+                'positions': positions,
+                'DOS': dos_values
+            })
     
     return {
         'invalid_cpts': not_recognized,
@@ -733,32 +846,54 @@ def index():
 def handle_process():
     if 'payrollFile' not in request.files or 'captureFile' not in request.files:
         return jsonify({'error': 'Missing files'}), 400
+    
     global output_filename
     payroll_file = request.files['payrollFile']
     capture_file = request.files['captureFile']
     payroll_sheet = request.form.get('payrollSheet')
+    date_range = request.form.get('dateRange')
+    
+    if not payroll_sheet:
+        return jsonify({'error': 'Payroll sheet name is required'}), 400
+    
+    if not date_range:
+        return jsonify({'error': 'Date range is required (format: MM.DD.YY-MM.DD.YY)'}), 400
+    
+    # Validate date range format
+    import re
+    if not re.match(r'^\d{2}\.\d{2}\.\d{2}-\d{2}\.\d{2}\.\d{2}$', date_range):
+        return jsonify({'error': 'Invalid date range format. Use MM.DD.YY-MM.DD.YY (e.g., 08.01.25-08.14.25)'}), 400
+    
     output_filename = request.form.get('outputFileName', 'processed_payroll.xlsx')
+    
     try:
         # Save uploaded files
-        payroll_path = os.path.join(app.config['UPLOAD_FOLDER'], payroll_file.filename)
-        capture_path = os.path.join(app.config['UPLOAD_FOLDER'], capture_file.filename)
+        payroll_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(payroll_file.filename or 'payroll.xlsx'))
+        capture_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(capture_file.filename or 'capture.xlsx'))
         payroll_file.save(payroll_path)
         capture_file.save(capture_path)
 
-        results = process_files(payroll_path, capture_path, payroll_sheet,output_filename)
-        invalid_cpts_array = [
-            {"name": codes["name"], "found": {k: v for k, v in codes.items() if k != "name"}}
-            for provider, codes  in results['invalid_cpts'].items()
-        ]
-
+        results = process_files(payroll_path, capture_path, payroll_sheet, output_filename, date_range)
+        
+        # Validate results structure
+        if not isinstance(results, dict):
+            return jsonify({'error': 'Invalid processing results'}), 500
+            
+        invalid_cpts_array = []
+        if 'invalid_cpts' in results and results['invalid_cpts']:
+            invalid_cpts_array = [
+                {"name": codes.get("name", provider), "found": {k: v for k, v in codes.items() if k != "name"}}
+                for provider, codes in results['invalid_cpts'].items()
+            ]
 
         return jsonify({
             'invalidCPTs': invalid_cpts_array,
-            'missingPositions': results['missing_positions'],
-            'missingProviders': results['missing_providers'],
+            'missingPositions': results.get('missing_positions', []),
+            'missingProviders': results.get('missing_providers', []),
         })
         
     except Exception as e:
+        logging.error(f"Error in handle_process: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/add_missing_cpt', methods=['POST'])
@@ -767,24 +902,28 @@ def handle_add_cpt():
     provider = data.get('provider')
     cpt = data.get('cpt')
     dos = data.get('dos')  # make sure it's included
-    global provider_cpt_dict,weekly_counts,date_range
+    global provider_cpt_dict, weekly_counts, date_range
     if not provider or not cpt:
         return jsonify({'error': 'Missing provider or CPT'}), 400
         
-
     try:
+        # Check if provider exists in provider_cpt_dict
+        if provider not in provider_cpt_dict:
+            return jsonify({'error': f'Provider {provider} not found in processed data'}), 400
 
-        print(provider_cpt_dict[provider])
+        print(f"Before update: {provider_cpt_dict.get(provider, {})}")
         # Update the in-memory dict directly
         update_cpt_counts(provider_cpt_dict, provider, cpt)
-        # Update the weekly counts DataFrame
-        weekly_counts=increment_encounter(provider,dos,weekly_counts,date_range,cpt)
+        # Update the weekly counts DataFrame if dos is provided
+        if dos and weekly_counts is not None and not weekly_counts.empty:
+            weekly_counts = increment_encounter(provider, dos, weekly_counts, date_range, cpt)
         # Record this manual update to re-apply later if provider_cpt_dict gets reset
         manual_cpt_updates.append({"provider": provider, "cpt": cpt})
-        print(provider_cpt_dict[provider])
+        print(f"After update: {provider_cpt_dict.get(provider, {})}")
         return jsonify({'success': True})
         
     except Exception as e:
+        logging.error(f"Error in handle_add_cpt: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 @app.route('/save_changes', methods=['POST'])
@@ -793,34 +932,37 @@ def handle_save_changes():
     
     if not current_workbook or not sheet:
         return jsonify({'error': 'No workbook loaded. Process files first.'}), 400
+        
     if not output_filename:
         # Fallback filename if not set, though it should be set by /process
         output_filename = "processed_payroll_download.xlsx"
         logging.warning("Output filename was not set, using default for download.")
 
     try:
-       # Ensure the sheet is up-to-date with the latest data from provider_cpt_dict
-       write_provider_cpt_data_to_sheet(
-           payroll_df=payroll_df,
-           common_providers=common_providers,
-           practitioner_list=practitioner_list,
-           provider_cpt_dict=provider_cpt_dict,
-           cpt_positions=cpt_positions,
-           output_filename=output_filename
-       )
-       # Save workbook to a BytesIO stream
-       file_stream = BytesIO()
-       current_workbook.save(file_stream)
-       file_stream.seek(0) # Rewind the stream to the beginning
+        # Ensure the sheet is up-to-date with the latest data from provider_cpt_dict
+        if payroll_df is not None and common_providers and practitioner_list and provider_cpt_dict and cpt_positions:
+            write_provider_cpt_data_to_sheet(
+                payroll_df=payroll_df,
+                common_providers=common_providers,
+                practitioner_list=practitioner_list,
+                provider_cpt_dict=provider_cpt_dict,
+                cpt_positions=cpt_positions,
+                output_filename=output_filename
+            )
+        
+        # Save workbook to a BytesIO stream
+        file_stream = BytesIO()
+        current_workbook.save(file_stream)
+        file_stream.seek(0)  # Rewind the stream to the beginning
 
-       logging.info(f"Workbook prepared for download as {output_filename}")
+        logging.info(f"Workbook prepared for download as {output_filename}")
 
-       return send_file(
-           file_stream,
-           as_attachment=True,
-           download_name=output_filename, # Use the globally set output_filename
-           mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-       )
+        return send_file(
+            file_stream,
+            as_attachment=True,
+            download_name=output_filename,  # Use the globally set output_filename
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
 
     except Exception as e:
         logging.error(f"Error in /save_changes: {e}", exc_info=True)
@@ -828,40 +970,64 @@ def handle_save_changes():
 
 @app.route('/add_new_cpt_column', methods=['POST'])
 def add_new_cpt_column():
-    global cpt_positions,sheet,not_recognized,provider_cpt_dict,Gross_encounters_col,week2_encounters_col_idx,week1_encounters_col_idx
+    global cpt_positions, sheet, not_recognized, provider_cpt_dict, Gross_encounters_col, week2_encounters_col_idx, week1_encounters_col_idx, cpt_counts
+    
     data = request.get_json()
     cpt_code = data.get('cpt', '').strip()
 
     if not cpt_code:
         return jsonify({'success': False, 'error': 'CPT code is required.'}), 400
 
-    # TODO: Add logic here to insert CPT column into your DataFrame or database
-    print(f"Received CPT code to add: {cpt_code}")
+    # Check if CPT code already exists
     if cpt_code in cpt_positions:
         return jsonify({'success': False, 'error': 'CPT code already exists.'}), 400
-    last_cpt_index=cpt_positions[(list(cpt_positions))[-1]]
-    new_cpt_index=last_cpt_index+6 # not zero based 
-    add_new_cpt(cpt_code, new_cpt_index)
-    # output_path = "D:\\PayRoll\\Practitioners Payroll Modified.xlsx" for testing
-    cpt_positions[cpt_code]=new_cpt_index-1 #zero based 
-    Gross_encounters_col=Gross_encounters_col+5
-    week2_encounters_col_idx=week2_encounters_col_idx+5
-    week1_encounters_col_idx=week1_encounters_col_idx+5
-    
-    process_cpt_counts(cpt_counts,cpt_positions)
-    apply_manual_cpt_updates()
-    write_provider_cpt_data_to_sheet(
-        payroll_df=payroll_df,
-        common_providers=common_providers,
-        practitioner_list=practitioner_list,
-        provider_cpt_dict=provider_cpt_dict,
-        cpt_positions=cpt_positions,
-        output_filename=output_filename
-    )
-    # not_recognized= remove_cpt_from_providers(not_recognized, cpt_code)
-    # current_workbook.save(output_path)
-    # Simulate success (replace with actual logic)
-    return jsonify({'success': True, 'invalid_cpts': not_recognized}), 200
+
+    # Check if we have the necessary global variables initialized
+    if not cpt_positions or not sheet:
+        return jsonify({'success': False, 'error': 'No payroll data loaded. Process files first.'}), 400
+
+    try:
+        # Get the last CPT position to calculate new position
+        if not cpt_positions:
+            return jsonify({'success': False, 'error': 'No existing CPT positions found.'}), 400
+            
+        last_cpt_index = cpt_positions[list(cpt_positions.keys())[-1]]
+        new_cpt_index = last_cpt_index + 6  # not zero based 
+        
+        # Add the new CPT column to the sheet
+        success = add_new_cpt(cpt_code, new_cpt_index)
+        if not success:
+            return jsonify({'success': False, 'error': 'Failed to add CPT column to sheet.'}), 500
+            
+        # Update positions and indices
+        cpt_positions[cpt_code] = new_cpt_index - 1  # zero based 
+        if Gross_encounters_col is not None:
+            Gross_encounters_col = Gross_encounters_col + 5
+        if week2_encounters_col_idx is not None:
+            week2_encounters_col_idx = week2_encounters_col_idx + 5
+        if week1_encounters_col_idx is not None:
+            week1_encounters_col_idx = week1_encounters_col_idx + 5
+        
+        # Reprocess CPT counts with updated positions
+        if cpt_counts is not None and not cpt_counts.empty:
+            process_cpt_counts(cpt_counts, cpt_positions)
+            apply_manual_cpt_updates()
+            
+            # Update the sheet with new data
+            write_provider_cpt_data_to_sheet(
+                payroll_df=payroll_df,
+                common_providers=common_providers,
+                practitioner_list=practitioner_list,
+                provider_cpt_dict=provider_cpt_dict,
+                cpt_positions=cpt_positions,
+                output_filename=output_filename
+            )
+        
+        return jsonify({'success': True, 'invalid_cpts': not_recognized}), 200
+        
+    except Exception as e:
+        logging.error(f"Error in add_new_cpt_column: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
 # --- Application Control (Shutdown and Browser Launch) ---
 
 @app.route('/shutdown', methods=['POST'])
@@ -876,10 +1042,11 @@ def shutdown_server():
         os._exit(0)  # Forcefully terminate the Python process
     func()
 
-# Function to open the default web browser
-def open_browser():
-    webbrowser.open_new("http://localhost:5000")
+# # Function to open the default web browser
+# def open_browser():
+#     webbrowser.open_new("http://localhost:5000")
 
-if __name__ == '__main__':
-    threading.Timer(1, open_browser).start()  # Open the browser after 1 second
-    app.run(host='localhost', port=5000)
+# Main application entry point (commented out as this is imported by main.py)
+# if __name__ == '__main__':
+#     threading.Timer(1, open_browser).start()  # Open the browser after 1 second
+#     app.run(host='localhost', port=5000)

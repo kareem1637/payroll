@@ -117,6 +117,7 @@
                 </tbody>
             </table>
         </div>
+    <!-- Download buttons will be appended here -->
     </div>
 </div>
 <script>
@@ -133,6 +134,11 @@ function renderTable(data, tbodyId) {
 const form = document.getElementById('upload-form');
 form.addEventListener('submit', async function(e) {
     e.preventDefault();
+    // Clear previous download containers to avoid duplicates
+    ['pptx-download-div', 'workbook-download-div'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+    });
     const rosterFile = document.getElementById('roster-file').files[0];
     const chargeFile = document.getElementById('charge-file').files[0];
     const dayField = document.getElementById('day-field').value;
@@ -163,23 +169,83 @@ form.addEventListener('submit', async function(e) {
             document.getElementById('results-section').style.display = 'block';
             renderTable(result.matched_providers, 'matched-table-body');
             renderTable(result.unmatched_providers, 'unmatched-table-body');
+            // Add download links similar to Margin page (deduplicated)
+            // PowerPoint download
             if (result.pptx_path) {
-                const downloadDiv = document.createElement('div');
-                downloadDiv.className = 'text-center my-3';
-                downloadDiv.innerHTML = `<a href='/${result.pptx_path}' class='btn btn-success' download>Download PowerPoint Report</a>`;
-                document.getElementById('results-section').appendChild(downloadDiv);
+                const pptxDivId = 'pptx-download-div';
+                let existingPptxDiv = document.getElementById(pptxDivId);
+                const resultsSection = document.getElementById('results-section');
+                if (!existingPptxDiv && resultsSection) {
+                    const downloadDiv = document.createElement('div');
+                    downloadDiv.id = pptxDivId;
+                    downloadDiv.className = 'text-center my-3';
+                    const a = document.createElement('a');
+                    a.href = `/${result.pptx_path}?delete=1`;
+                    a.className = 'btn btn-success';
+                    a.setAttribute('download', '');
+                    a.textContent = 'Download PowerPoint Report';
+                    downloadDiv.appendChild(a);
+                    resultsSection.appendChild(downloadDiv);
+                    // auto-delete after download click (quiet)
+                    attachAutoDelete(a, ['Weekly_report_report.pptx']);
+                } else if (existingPptxDiv) {
+                    const a = existingPptxDiv.querySelector('a');
+                    if (a) a.href = `/${result.pptx_path}?delete=1`;
+                    attachAutoDelete(a, ['Weekly_report_report.pptx']);
+                }
             }
-            const verificationNote = document.getElementById('verification-note');
-            if (verificationNote) {
-                verificationNote.style.display = 'block';
+
+            // Workbook (Excel)
+            const workbookDivId = 'workbook-download-div';
+            let workbookDiv = document.getElementById(workbookDivId);
+            const resultsSection2 = document.getElementById('results-section');
+            if (!workbookDiv && resultsSection2) {
+                workbookDiv = document.createElement('div');
+                workbookDiv.id = workbookDivId;
+                workbookDiv.className = 'text-center my-3';
+                const link = document.createElement('a');
+                link.href = '/uploads/Work_book.xlsx?delete=1';
+                link.className = 'btn btn-outline-success';
+                link.textContent = 'Download Workbook (Excel)';
+                workbookDiv.appendChild(link);
+                resultsSection2.appendChild(workbookDiv);
+                // auto-delete after download click (quiet)
+                attachAutoDelete(link, ['Work_book.xlsx']);
+            } else if (workbookDiv) {
+                const link = workbookDiv.querySelector('a');
+                if (link) link.href = '/uploads/Work_book.xlsx?delete=1';
+                attachAutoDelete(link, ['Work_book.xlsx']);
             }
             const resultsSection = document.getElementById('results-section');
             if (resultsSection) {
-                const noteDiv = document.createElement('div');
-                noteDiv.className = 'alert alert-warning mt-3';
-                noteDiv.innerHTML = `
-                    <strong>Important:</strong> The table below only shows provider matches with scores between <b>60 and 90</b>, which are likely to be potential mistakes. Please carefully review these names before using the report. If you find any incorrect matches, update the names in your roster file so they match the charge capture file, then re-upload for best results.`;
-                resultsSection.insertAdjacentElement('afterbegin', noteDiv);
+                const noteId = 'verification-note';
+                let noteDiv = document.getElementById(noteId);
+                if (!noteDiv) {
+                    noteDiv = document.createElement('div');
+                    noteDiv.id = noteId;
+                    noteDiv.className = 'alert alert-warning mt-3';
+                    noteDiv.innerHTML = `
+                        <strong>Important:</strong> The table below only shows provider matches with scores between <b>60 and 90</b>, which are likely to be potential mistakes. Please carefully review these names before using the report. If you find any incorrect matches, update the names in your roster file so they match the charge capture file, then re-upload for best results.`;
+                    resultsSection.insertAdjacentElement('afterbegin', noteDiv);
+                } else {
+                    noteDiv.style.display = 'block';
+                }
+
+                // Add a manual cleanup button (deduped)
+                const cleanupDivId = 'cleanup-div';
+                let cleanupDiv = document.getElementById(cleanupDivId);
+                if (!cleanupDiv) {
+                    cleanupDiv = document.createElement('div');
+                    cleanupDiv.id = cleanupDivId;
+                    cleanupDiv.className = 'text-center my-2';
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'btn btn-outline-danger btn-sm';
+                    btn.textContent = 'Delete generated files';
+                    btn.onclick = () => deleteGenerated(['Weekly_report_report.pptx', 'Work_book.xlsx']);
+                    resultsSection.appendChild(cleanupDiv);
+                    cleanupDiv.appendChild(btn);
+                }
             }
         } else {
             alert('Processing failed or no results returned.');
@@ -202,6 +268,50 @@ document.getElementById('date-field').addEventListener('change', function() {
         document.getElementById('day-field').value = '';
     }
 });
+
+// Helper to delete generated files via API
+async function deleteGenerated(files) {
+    try {
+        const resp = await fetch('/api/uploads/delete', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-API-KEY': '0de34eb2-cb58-4f1e-a7b8-2e55cf0e5331'
+            },
+            body: JSON.stringify({ filenames: files })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || data.success === false) {
+            alert('Delete failed' + (data.error ? `: ${data.error}` : '.'));
+        } else {
+            const msg = `Deleted: ${(data.deleted||[]).join(', ') || 'none'}\nNot found: ${(data.not_found||[]).join(', ') || 'none'}`;
+            alert(msg);
+        }
+    } catch (e) {
+        alert('Delete error: ' + e.message);
+    }
+}
+
+// Quiet auto-delete on click, delayed to allow download to start
+function attachAutoDelete(anchor, files) {
+    if (!anchor || anchor.__autoDeleteAttached) return;
+    anchor.__autoDeleteAttached = true;
+    anchor.addEventListener('click', () => {
+        setTimeout(() => autoDeleteGenerated(files), 1500);
+    });
+}
+async function autoDeleteGenerated(files) {
+    try {
+        await fetch('/api/uploads/delete', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-API-KEY': '0de34eb2-cb58-4f1e-a7b8-2e55cf0e5331'
+            },
+            body: JSON.stringify({ filenames: files })
+        });
+    } catch (_) { /* ignore */ }
+}
 </script>
 </body>
 </html>

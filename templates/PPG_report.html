@@ -314,14 +314,42 @@
             }
             const result = await response.json();
             if (result.success && result.pptx_path) {
-                // Trigger download
-                const downloadUrl = result.pptx_path.startsWith('/') ? result.pptx_path : ('/' + result.pptx_path);
+                // Deduped download container
+                const containerId = 'pptx-download-div';
+                let c = document.getElementById(containerId);
+                if (!c) {
+                    c = document.createElement('div');
+                    c.id = containerId;
+                    c.className = 'text-center my-3';
+                    document.querySelector('.dashboard-container').appendChild(c);
+                } else {
+                    c.innerHTML = '';
+                }
                 const a = document.createElement('a');
+                const downloadUrl = (result.pptx_path.startsWith('/') ? result.pptx_path : ('/' + result.pptx_path)) + '?delete=1';
                 a.href = downloadUrl;
-                a.download = 'generated_pbj_report.pptx';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
+                a.className = 'btn btn-success';
+                a.setAttribute('download', 'generated_pbj_report.pptx');
+                a.textContent = 'Download PowerPoint Report';
+                c.appendChild(a);
+                // auto-delete after download click (quiet)
+                attachAutoDelete(a, ['generated_pbj_report.pptx']);
+
+                // Add manual cleanup button (deduped)
+                const cleanupId = 'cleanup-div';
+                let cleanupDiv = document.getElementById(cleanupId);
+                if (!cleanupDiv) {
+                    cleanupDiv = document.createElement('div');
+                    cleanupDiv.id = cleanupId;
+                    cleanupDiv.className = 'text-center my-2';
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.className = 'btn btn-outline-danger btn-sm';
+                    btn.textContent = 'Delete generated files';
+                    btn.onclick = () => deleteGenerated(['generated_pbj_report.pptx']);
+                    document.querySelector('.dashboard-container').appendChild(cleanupDiv);
+                    cleanupDiv.appendChild(btn);
+                }
             } else {
                 alert('Processing failed.');
             }
@@ -331,6 +359,50 @@
             document.getElementById('loading-overlay').style.display = 'none';
         }
     });
+
+    // Helper to delete generated files via API
+    async function deleteGenerated(files) {
+        try {
+            const resp = await fetch('/api/uploads/delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-API-KEY': '0de34eb2-cb58-4f1e-a7b8-2e55cf0e5331'
+                },
+                body: JSON.stringify({ filenames: files })
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok || data.success === false) {
+                alert('Delete failed' + (data.error ? `: ${data.error}` : '.'));
+            } else {
+                const msg = `Deleted: ${(data.deleted||[]).join(', ') || 'none'}\nNot found: ${(data.not_found||[]).join(', ') || 'none'}`;
+                alert(msg);
+            }
+        } catch (e) {
+            alert('Delete error: ' + e.message);
+        }
+    }
+
+    // Quiet auto-delete on click, delayed to allow download to start
+    function attachAutoDelete(anchor, files) {
+        if (!anchor || anchor.__autoDeleteAttached) return;
+        anchor.__autoDeleteAttached = true;
+        anchor.addEventListener('click', () => {
+            setTimeout(() => autoDeleteGenerated(files), 1500);
+        });
+    }
+    async function autoDeleteGenerated(files) {
+        try {
+            await fetch('/api/uploads/delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-API-KEY': '0de34eb2-cb58-4f1e-a7b8-2e55cf0e5331'
+                },
+                body: JSON.stringify({ filenames: files })
+            });
+        } catch (_) { /* ignore */ }
+    }
 </script>
 </body>
 </html>

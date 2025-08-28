@@ -150,6 +150,9 @@
 <body class="p-4">
     <div class="container">
         <h2 class="mb-4 text-center">Payroll Automation</h2>
+        <div class="text-center mb-3">
+            <button type="button" class="btn btn-outline-danger btn-sm" onclick="deleteGenerated(['processed_payroll.xlsx'])">Delete generated files</button>
+        </div>
 
 
         <form id="uploadForm" enctype="multipart/form-data">
@@ -176,6 +179,14 @@
                     <label class="form-label">Select Capture Sheet</label>
                     <select class="form-select" id="captureSheetSelect" name="captureSheet"></select>
                 </div>
+            </div>
+
+            <div class="mb-4">
+                <label class="form-label">Date Range (MM.DD.YY-MM.DD.YY)</label>
+                <input type="text" id="dateRange" name="dateRange" class="form-control"
+                    placeholder="e.g., 08.01.25-08.14.25" pattern="\d{2}\.\d{2}\.\d{2}-\d{2}\.\d{2}\.\d{2}"
+                    title="Format: MM.DD.YY-MM.DD.YY (e.g., 08.01.25-08.14.25)">
+                <div class="form-text">Enter the date range for processing (start date - end date)</div>
             </div>
 
             <button class="btn btn-primary mb-4" onclick="processData(event)">Process Files</button>
@@ -332,11 +343,31 @@
                 loader.hide();
                 return;
             }
+
+            // Validate date range
+            const dateRange = document.getElementById('dateRange').value.trim();
+            if (!dateRange) {
+                alert("Please enter a date range (e.g., 08.01.25-08.14.25).");
+                button.disabled = false;
+                loader.hide();
+                return;
+            }
+
+            // Validate date range format
+            const dateRangePattern = /^\d{2}\.\d{2}\.\d{2}-\d{2}\.\d{2}\.\d{2}$/;
+            if (!dateRangePattern.test(dateRange)) {
+                alert("Please enter date range in correct format: MM.DD.YY-MM.DD.YY (e.g., 08.01.25-08.14.25)");
+                button.disabled = false;
+                loader.hide();
+                return;
+            }
+
             loader.updateMessage(`Processing: ${payrollFile.name} & ${captureFile.name}`);
             formData.append('payrollFile', payrollFile);
             formData.append('captureFile', captureFile);
             formData.append('payrollSheet', document.getElementById('payrollSheetSelect').value);
             formData.append('captureSheet', document.getElementById('captureSheetSelect').value);
+            formData.append('dateRange', dateRange);
             const outputFileName = document.getElementById('outputFileName').value.trim() || 'processed_payroll.xlsx';
             formData.append('outputFileName', outputFileName);
             try {
@@ -758,6 +789,29 @@
                     toastContainer.remove();
                 }
             }, 5000);
+        }
+    </script>
+    <script>
+        // Helper to delete generated files via API
+        async function deleteGenerated(files) {
+            try {
+                const resp = await fetch('/api/uploads/delete', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-KEY': '0de34eb2-cb58-4f1e-a7b8-2e55cf0e5331'
+                    },
+                    body: JSON.stringify({ filenames: files })
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || data.success === false) {
+                    showErrorMessage('Delete failed' + (data.error ? `: ${data.error}` : '.'));
+                } else {
+                    showSuccessMessage(`Deleted: ${(data.deleted||[]).join(', ') || 'none'} | Not found: ${(data.not_found||[]).join(', ') || 'none'}`);
+                }
+            } catch (e) {
+                showErrorMessage('Delete error: ' + e.message);
+            }
         }
     </script>
 </body>

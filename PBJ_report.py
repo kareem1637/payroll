@@ -669,10 +669,10 @@ def upload_logo():
     logo_file.save(logo_path)
     return jsonify({'success': True, 'logo_path': logo_path})
 
-# Function to open the default web browser
-def open_browser():
-    webbrowser.open_new("http://localhost:9000")
+# # Function to open the default web browser
+# def open_browser():
+#     webbrowser.open_new("http://localhost:9000")
 
-if __name__ == '__main__':
-    threading.Timer(1, open_browser).start()  # Open the browser after 1 second
-    app.run(host='localhost', port=9000)
+# if __name__ == '__main__':
+#     threading.Timer(1, open_browser).start()  # Open the browser after 1 second
+#     app.run(host='localhost', port=9000)

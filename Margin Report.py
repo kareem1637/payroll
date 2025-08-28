@@ -373,7 +373,41 @@ def match_providers(providers, org_providers, threshold=76):
     unmatched = sorted(unmatched_map.values(), key=lambda x: x['score'], reverse=True)
     return {"matched": matched, "unmatched": unmatched}
 
-def preprocess_PR_FDR(PR_df, FDR_df):
+def preprocess_PR_FDR_xlsx(PR_df, FDR_df):
+
+    def _to_numeric_series(s: pd.Series) -> pd.Series:
+        cleaned = (
+            s.astype(str).str.strip()
+             .str.replace(r'[,\s$]', '', regex=True)
+             .str.replace(r'^\((.*)\)$', r'-\1', regex=True)
+        )
+        return pd.to_numeric(cleaned, errors='coerce')
+    PR_df = PR_df.loc[:, ["NAME","REGULAR EARNINGS","GROSS PAY"]].copy()
+    PR_df.dropna(subset=["NAME"], inplace=True)
+    for row in PR_df.itertuples():
+        personnel = row.NAME
+        personnel = personnel.strip().split(",")
+        personnel = personnel[1].strip() + " " + personnel[0].strip()
+        PR_df.at[row.Index, 'NAME'] = personnel
+    new_PR_sum=PR_df.groupby("NAME").agg({"GROSS PAY":"sum","REGULAR EARNINGS":"sum"}).reset_index()
+    # rename columns
+    new_PR_sum = new_PR_sum.rename(columns={"NAME":"Personnel", "REGULAR EARNINGS":"Earnings_Reg", "GROSS PAY":"Gross"})
+    
+    # Ensure numeric types for payroll
+    new_PR_sum["Earnings_Reg"] = _to_numeric_series(new_PR_sum["Earnings_Reg"])
+    new_PR_sum["Gross"] = _to_numeric_series(new_PR_sum["Gross"])
+
+    # FDR cleanup and numeric (copy slice first)
+    FDR_df = FDR_df.loc[:, ["PROVIDER","NET CHARGES","NET RECEIPTS"]].copy()
+    FDR_df["NET CHARGES"] = _to_numeric_series(FDR_df["NET CHARGES"])
+    FDR_df["NET RECEIPTS"] = _to_numeric_series(FDR_df["NET RECEIPTS"])
+
+    FDR_df = FDR_df[~((FDR_df["NET CHARGES"] == 0.0) & (FDR_df["NET RECEIPTS"] == 0.0))]
+    FDR_df.drop_duplicates(subset=["PROVIDER"], inplace=True)
+    new_PR_sum.drop_duplicates(subset=["Personnel"], inplace=True)
+    return new_PR_sum, FDR_df
+
+def preprocess_PR_FDR_xls(PR_df, FDR_df):
         # Merge first 2 rows into one header row
     header1 = PR_df.iloc[0].fillna("")
     header2 = PR_df.iloc[1].fillna("")
@@ -553,15 +587,15 @@ def build_metadata(charge_capture_df, company_roster_df, PR_df, FDR_df):
         if not pd.isna(receipts_value) and receipts_value != 0:
             regular_pay = Margin_df.loc[Margin_df['Clinician_Name'] == charge_capture_name, 'Regular_Pay'].values[0]
             if not pd.isna(regular_pay):
-                regular_margin = (receipts_value / regular_pay ) * 100 if regular_pay != 0 else 0
+                regular_margin = ( regular_pay/receipts_value ) * 100 if regular_pay != 0 else 0
                 Margin_df.loc[Margin_df['Clinician_Name'] == charge_capture_name, 'Regular_Margin'] = round(regular_margin,2)
                 
         # Net_Margin "(gross pay column / collections)*100"
         if not pd.isna(charges_value) and charges_value != 0:
             gross_pay = Margin_df.loc[Margin_df['Clinician_Name'] == charge_capture_name, 'Gross_Pay'].values[0]
             if not pd.isna(gross_pay):
-                Anticipated_Net_Margin = (charges_value/ gross_pay ) * 100 if gross_pay != 0 else 0
-                net_margin = (receipts_value / gross_pay) * 100 if gross_pay != 0 else 0
+                Anticipated_Net_Margin = ( gross_pay/charges_value ) * 100 if gross_pay != 0 else 0
+                net_margin = ( gross_pay/receipts_value ) * 100 if gross_pay != 0 else 0
                 Margin_df.loc[Margin_df['Clinician_Name'] == charge_capture_name, 'Anticipated_Net_Margin'] = round(Anticipated_Net_Margin, 2)
                 Margin_df.loc[Margin_df['Clinician_Name'] == charge_capture_name, 'Net_Margin'] = round(net_margin, 2)
 
@@ -951,19 +985,23 @@ def upload_data():
     else:
         company_roaster = pd.read_excel(roster_temp_path, skiprows=2)
 
-    # Read PR file if provided
-    if PR_file_filename:
-        if PR_ext.endswith('.xls'):
-            PR_df = pd.read_excel(PR_temp_path,sheet_name=PR_sheet_name,header=None)
-        else:
-            return jsonify({'error': 'Invalid PR file type plase upload with xls extension'}), 400
+
     if FDR_file_filename:
         if FDR_ext.endswith('.xlsx'):
             FDR_df = pd.read_excel(FDR_temp_path)
         else:
             return jsonify({'error': 'Invalid FDR file type plase upload with xlsx extension'}), 400
-    
-    PR_df, FDR_df = preprocess_PR_FDR(PR_df, FDR_df)
+        # Read PR file if provided
+    if PR_file_filename:
+        if PR_ext.endswith('.xls'):
+            PR_df = pd.read_excel(PR_temp_path,sheet_name=PR_sheet_name,header=None)
+            PR_df, FDR_df = preprocess_PR_FDR_xls(PR_df, FDR_df)
+        elif PR_ext.endswith('.xlsx'):
+            PR_df=pd.read_excel("D:\payroll\Payroll History (18) (1).xlsx")
+            PR_df, FDR_df = preprocess_PR_FDR_xlsx(PR_df, FDR_df)
+        else:
+            return jsonify({'error': 'Invalid PR file type plase upload with xls extension'}), 400
+ 
     # Get month and report_type from form
 
     day = request.form.get('day')

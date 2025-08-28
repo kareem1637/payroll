@@ -604,7 +604,57 @@ def generate_pbj_presentation(prs:Presentation,Regional_Dashboard: pd.DataFrame,
                                     run.font.size = fontSize
     remove_slide(prs, prs.slides[1])  # Remove the first slide if it's a title slide or not needed
     remove_slide(prs, prs.slides[1])  # Remove the second slide (after first removal, next is at index 1)
+def save_workbook(workbook, filename):
+    """Save the workbook (a pandas.DataFrame) to an Excel file with reasonable formatting.
 
+    Parameters:
+        workbook: pandas.DataFrame
+        filename: str - output path
+    """
+    output_path = filename
+
+    # Make a safe copy and stringify any list-like cells
+    _to_str = lambda v: ", ".join(map(str, v)) if isinstance(v, (list, tuple)) else v
+    _margin_out = workbook.copy()
+    for col in _margin_out.select_dtypes(include=["object"]).columns:
+        _margin_out[col] = _margin_out[col].map(_to_str)
+
+    with pd.ExcelWriter(output_path, engine="xlsxwriter") as writer:
+        _margin_out.to_excel(writer, sheet_name="Margin", index=False)
+        wb = writer.book
+        ws = writer.sheets["Margin"]
+
+        header_fmt = wb.add_format({"bold": True, "text_wrap": True, "valign": "top", "fg_color": "#DDEBF7", "border": 1})
+        wrap_fmt = wb.add_format({"text_wrap": True, "valign": "top"})
+        int_fmt = wb.add_format({"num_format": "#,##0"})
+        float_fmt = wb.add_format({"num_format": "#,##0.00"})
+
+        # Rewrite headers with format
+        for j, col in enumerate(_margin_out.columns):
+            ws.write(0, j, col, header_fmt)
+
+        # Autosize columns and set formats
+        for j, col in enumerate(_margin_out.columns):
+            ser = _margin_out[col]
+            try:
+                est_len = int(ser.astype(str).str.len().quantile(0.95)) if len(ser) else 0
+            except Exception:
+                est_len = int(ser.astype(str).str.len().max() if len(ser) else 0)
+            max_len = max(len(str(col)), est_len) + 2
+            width = min(max_len, 60)
+
+            if pd.api.types.is_integer_dtype(ser):
+                fmt = int_fmt
+            elif pd.api.types.is_float_dtype(ser):
+                fmt = float_fmt
+            else:
+                fmt = wrap_fmt
+
+            ws.set_column(j, j, width, fmt)
+
+        # Freeze header and add autofilter
+        ws.freeze_panes(1, 0)
+        ws.autofilter(0, 0, len(_margin_out), len(_margin_out.columns) - 1)
 @app.route('/')
 def index():
     return render_template('Weekly_report.html')
@@ -656,7 +706,11 @@ def upload_data():
     prs = load_editable_presentation(os.path.join(BASE_DIR, 'static', 'Weekly Report Example.pptx'), day= day, Date=date)
     generate_pbj_presentation(prs, Regional_Dashboard, gouped_CC_ByRegion, day, date, Add_region=include_regions)
     output_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Weekly_report_report.pptx')
+    workBook_path = os.path.join(app.config['UPLOAD_FOLDER'], 'Work_book.xlsx')
     prs.save(output_path)
+    # Save Margin_df to Excel
+    print("Saving workbook to:", workBook_path)
+    save_workbook(gouped_CC_ByRegion, workBook_path)
     # Optionally, return download link or status
     # Return the relative path for the frontend to use in download URL
     return jsonify({
@@ -674,14 +728,14 @@ from flask import send_from_directory
 def download_file(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'], filename, as_attachment=True)
 
-# Function to open the default web browser
-import os
-def open_browser():
-    webbrowser.open_new("http://localhost:8000")
+# # Function to open the default web browser
+# import os
+# def open_browser():
+#     webbrowser.open_new("http://localhost:8000")
 
-if __name__ == '__main__':
-    # Only open browser in local development
-    if os.environ.get('RENDER') is None:
-        threading.Timer(1, open_browser).start()  # Open the browser after 1 second
-    port = int(os.environ.get('PORT', 8000))
-    app.run(host='0.0.0.0', port=port)
+# if __name__ == '__main__':
+#     # Only open browser in local development
+#     if os.environ.get('RENDER') is None:
+#         threading.Timer(1, open_browser).start()  # Open the browser after 1 second
+#     port = int(os.environ.get('PORT', 8000))
+#     app.run(host='0.0.0.0', port=port)
