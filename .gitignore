@@ -8,4 +8,4 @@ uploads/
 build/
 *.spec
 *.ipynb
-
+*.xlsx

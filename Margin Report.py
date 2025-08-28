@@ -587,15 +587,15 @@ def build_metadata(charge_capture_df, company_roster_df, PR_df, FDR_df):
         if not pd.isna(receipts_value) and receipts_value != 0:
             regular_pay = Margin_df.loc[Margin_df['Clinician_Name'] == charge_capture_name, 'Regular_Pay'].values[0]
             if not pd.isna(regular_pay):
-                regular_margin = ( regular_pay/receipts_value ) * 100 if regular_pay != 0 else 0
+                regular_margin = ( 1-(regular_pay/receipts_value) ) * 100 if regular_pay != 0 else 0
                 Margin_df.loc[Margin_df['Clinician_Name'] == charge_capture_name, 'Regular_Margin'] = round(regular_margin,2)
                 
         # Net_Margin "(gross pay column / collections)*100"
         if not pd.isna(charges_value) and charges_value != 0:
             gross_pay = Margin_df.loc[Margin_df['Clinician_Name'] == charge_capture_name, 'Gross_Pay'].values[0]
             if not pd.isna(gross_pay):
-                Anticipated_Net_Margin = ( gross_pay/charges_value ) * 100 if gross_pay != 0 else 0
-                net_margin = ( gross_pay/receipts_value ) * 100 if gross_pay != 0 else 0
+                Anticipated_Net_Margin = (1- (gross_pay/charges_value) ) * 100 if gross_pay != 0 else 0
+                net_margin = ( 1-(gross_pay/receipts_value) ) * 100 if gross_pay != 0 else 0
                 Margin_df.loc[Margin_df['Clinician_Name'] == charge_capture_name, 'Anticipated_Net_Margin'] = round(Anticipated_Net_Margin, 2)
                 Margin_df.loc[Margin_df['Clinician_Name'] == charge_capture_name, 'Net_Margin'] = round(net_margin, 2)
 
