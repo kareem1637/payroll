@@ -34,18 +34,18 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # --- API Key Security ---
-# API_KEY = os.environ.get('API_KEY', 'your-secret-key')
+API_KEY = os.environ.get('API_KEY', 'your-secret-key')
 
-# @app.before_request
-# def check_api_key():
-#     # Allow static files and home page without API key
-#     if request.path.startswith('/static') or request.path.startswith('/uploads') or request.path in ['/', '/favicon.ico']:
-#         return
-#     # Only check for API key on API endpoints
-#     if request.path.startswith('/api/'):
-#         client_key = request.headers.get('X-API-KEY')
-#         if client_key != API_KEY:
-#             return jsonify({'error': 'Invalid or missing API key'}), 401
+@app.before_request
+def check_api_key():
+    # Allow static files and home page without API key
+    if request.path.startswith('/static') or request.path.startswith('/uploads') or request.path in ['/', '/favicon.ico']:
+        return
+    # Only check for API key on API endpoints
+    if request.path.startswith('/api/'):
+        client_key = request.headers.get('X-API-KEY')
+        if client_key != API_KEY:
+            return jsonify({'error': 'Invalid or missing API key'}), 401
 
 
 from flask import send_from_directory
