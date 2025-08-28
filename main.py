@@ -307,7 +307,7 @@ def api_margin_upload_data():
             PR_df = pd.read_excel(PR_temp_path,sheet_name=PR_sheet_name,header=None)
             PR_df, FDR_df = MARGIN_MOD.preprocess_PR_FDR_xls(PR_df, FDR_df)
         elif PR_ext.endswith('.xlsx'):
-            PR_df=pd.read_excel("D:\payroll\Payroll History (18) (1).xlsx")
+            PR_df=pd.read_excel(PR_temp_path,sheet_name=PR_sheet_name)
             PR_df, FDR_df = MARGIN_MOD.preprocess_PR_FDR_xlsx(PR_df, FDR_df)
         else:
             return jsonify({'error': 'Invalid PR file type plase upload with xls extension'}), 400
