@@ -13,7 +13,7 @@ from pptx.dml.color import RGBColor
 from pptx.util import  Pt
 from pptx.enum.dml import MSO_FILL
 from pptx.oxml.xmlchemy import OxmlElement
-
+from rapidfuzz import fuzz,process
 def get_base_dir():
     if getattr(sys, 'frozen', False):
         return sys._MEIPASS  # PyInstaller extracts to this temp dir
@@ -41,27 +41,39 @@ def remove_slide(prs, slide):
 def load_charge_capture_data(filepath):
     return pd.read_excel(filepath)
 
-def group_facilities(charge_capture_df):
+def group_facilities(charge_capture_df,sites_tracker):
     sorted_fac = sorted(charge_capture_df['Facility'].unique())
-    stopwords = {"of", "the", "at", "and", "care", "center", "rehab", "nursing", "health", "llc", "snf", "m", "by", "for", "on", "in", "living", "villa", "home"}
+    stopwords = {"of", "the", "at","rehabilitation and nursing center","nursing and rehabilitation center"}
+
+    def normalize_name(name):
+        # Convert to lowercase and remove stopwords
+        if not isinstance(name, str):
+            name = str(name)
+        name = name.replace("-", "")  # Remove hyphens
+        name = name.replace("&", "and")  # Replace ampersands with 'and'
+        name=name.replace("(M)","")
+        words = name.lower()
+        return words
+    sites_tracker['Name'] = sites_tracker['Name'].astype(str)
     grouped_facilities = defaultdict(list)
     for fac in sorted_fac:
-        key = fac.split()[0]
-        if key.lower() in stopwords:
-            key = fac.split()[1]
-        grouped_facilities[key].append(fac)
+        normalized_fac = normalize_name(fac)
+        normalized_site = sites_tracker['Name'].apply(normalize_name)
+        match = process.extract(normalized_fac, normalized_site, scorer=fuzz.partial_ratio, limit=5)
+        if match[0][1] > 94:
+            filtered = sites_tracker[sites_tracker['Name'].str.contains(match[0][0], case=False, na=False)]
+            if not filtered.empty:
+                key = filtered['Chain'].values[0]
+                grouped_facilities[key].append(fac)
+        else:
+            key = fac.split()[0]
+            # print(fac)
+            if key.lower() in stopwords:
+                key = fac.split()[1]
+            grouped_facilities[key].append(fac)
     corporate_groups = {k: v for k, v in grouped_facilities.items() if len(v) > 1}
     single_facilities = {k: v for k, v in grouped_facilities.items() if len(v) == 1}
-    keys_to_remove = []
-    for key, facilities in single_facilities.items():
-        for corp_key in corporate_groups:
-            if corp_key.lower() in single_facilities[key][0].lower():
-                corporate_groups[corp_key].extend(facilities)
-                keys_to_remove.append(key)
-                break
-    for key in keys_to_remove:
-        if key in single_facilities:
-            del single_facilities[key]
+
     return corporate_groups, single_facilities
 
 def build_metadata(charge_capture_df, corporate_groups, single_facilities):
@@ -632,9 +644,10 @@ def upload_data():
               "July", "August", "September", "October", "November", "December"]
     month_name = months[month_index] if 0 <= month_index < 12 else "May"
     report_type = request.form.get('report_type', 'Both')
-
+    sites_tracker=pd.read_excel(os.path.join(BASE_DIR, 'static',"Site_Tracker_1754578592.xlsx"),header=2)
+    sites_tracker=sites_tracker[["Name","Chain"]]
     # Process as before
-    corporate_groups, single_facilities = group_facilities(charge_capture_df)
+    corporate_groups, single_facilities = group_facilities(charge_capture_df,sites_tracker)
     metadata = build_metadata(charge_capture_df, corporate_groups, single_facilities)
     prs = load_editable_presentation(os.path.join(BASE_DIR, 'static', 'reference_slide.pptx'), month_index=month_index)
     generate_pbj_presentation(prs, metadata, month=month_name, report_type=report_type)
