@@ -76,16 +76,18 @@ def group_facilities(charge_capture_df,sites_tracker):
 
     return corporate_groups, single_facilities
 
-def build_metadata(charge_capture_df, corporate_groups, single_facilities):
-    cpt_time_dict = {
-        "99304": 60,
-        "99305": 75,
-        "99306": 90,
-        "99307": 15,
-        "99308": 25,
-        "99309": 35,
-        "99310": 45
-    }
+def build_metadata(charge_capture_df, corporate_groups, single_facilities, cpt_time_dict=None):
+    # Allow custom CPT time mapping from UI; fall back to defaults
+    if not isinstance(cpt_time_dict, dict) or not cpt_time_dict:
+        cpt_time_dict = {
+            "99304": 60,
+            "99305": 75,
+            "99306": 90,
+            "99307": 15,
+            "99308": 25,
+            "99309": 35,
+            "99310": 45
+        }
     Facilites_groups = charge_capture_df.groupby('Facility', as_index=False)
     metadata = {}
     for key, facilities in corporate_groups.items():
@@ -442,6 +444,7 @@ def generate_pbj_presentation(prs:Presentation,metadata:dict, month="May",report
         if report_type == "detailed" or report_type == "Both":
             # --- SPLIT FACILITIES ACROSS SLIDES BASED ON MAX PROVIDERS ---
             facilities = list(corp_data['Facility_Data'].items())
+            print(f"Generating detailed slides for {corp} with {len(facilities)} facilities")
             max_providers_per_slide = 12
             def get_provider_count(facility_data):
                 providers = facility_data['Provider']
@@ -648,7 +651,8 @@ def upload_data():
     sites_tracker=sites_tracker[["Name","Chain"]]
     # Process as before
     corporate_groups, single_facilities = group_facilities(charge_capture_df,sites_tracker)
-    metadata = build_metadata(charge_capture_df, corporate_groups, single_facilities)
+    metadata = build_metadata(charge_capture_df, corporate_groups, single_facilities, cpt_time_dict)
+    chains=list(metadata.keys())
     prs = load_editable_presentation(os.path.join(BASE_DIR, 'static', 'reference_slide.pptx'), month_index=month_index)
     generate_pbj_presentation(prs, metadata, month=month_name, report_type=report_type)
     output_path = os.path.join(app.config['UPLOAD_FOLDER'], 'generated_pbj_report.pptx')

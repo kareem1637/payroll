@@ -91,6 +91,11 @@
                         <h5 class="card-title mb-3"><span class="me-2">📁</span>Upload Data</h5>
                         <label for="file-upload" class="form-label">Upload charge_capture_df (.csv or .xlsx)</label>
                         <input class="form-control" type="file" id="file-upload" accept=".csv,.xlsx">
+                        <button type="button" class="btn btn-outline-primary mt-3" id="btn-upload-get-chains">Upload & Get Chains</button>
+                        <div id="chains-container" class="mt-3 d-none">
+                            <label class="form-label">Select Chains to include</label>
+                            <div id="chains-list" class="border rounded p-2" style="max-height: 260px; overflow:auto;"></div>
+                        </div>
                     </div>
                 </div>
                 <div class="card shadow-sm border-0 h-100">
@@ -206,6 +211,11 @@
     </form>
 </div>
 <script>
+    let lastUploadedFilename = null;
+    let lastMonth = null;
+    let lastReportType = null;
+    let lastCptDict = null;
+
     // Logo upload button handler
     document.getElementById('upload-logo-btn').addEventListener('click', async function() {
         const logoInput = document.getElementById('logo-upload');
@@ -270,91 +280,85 @@
         }
     });
 
-    // API: Send CSV and CPT Code Time Table as dict to backend
-    document.getElementById('dashboard-form').addEventListener('submit', async function(e) {
-        e.preventDefault();
+    // Step 1: Upload and get chains
+    document.getElementById('btn-upload-get-chains').addEventListener('click', async function() {
         const fileInput = document.getElementById('file-upload');
         const file = fileInput.files[0];
-        if (!file) {
-            alert('Please upload a .csv or .xlsx file.');
-            return;
-        }
+        if (!file) { alert('Please upload a .csv or .xlsx file.'); return; }
         // Build CPT dict from table
         const cptDict = {};
         document.querySelectorAll('#cpt-time-table tbody tr').forEach(row => {
             const code = row.querySelector('td:nth-child(1) input').value.trim();
             const mins = row.querySelector('td:nth-child(2) input').value.trim();
-            if (code && mins) {
-                cptDict[code] = Number(mins);
-            }
+            if (code && mins) { cptDict[code] = Number(mins); }
         });
-        // Get month and report type
-        const month = document.getElementById('month-selector').value;
-        const reportType = document.getElementById('report-type').value;
-        // Prepare form data
+        // Save selections for step 2
+        lastMonth = document.getElementById('month-selector').value;
+        lastReportType = document.getElementById('report-type').value;
+        lastCptDict = cptDict;
         const formData = new FormData();
         formData.append('file', file);
         formData.append('cpt_time_dict', JSON.stringify(cptDict));
-        formData.append('month', month);
-        formData.append('report_type', reportType);
-        // Show loading overlay
+        formData.append('month', lastMonth);
+        formData.append('report_type', lastReportType);
         document.getElementById('loading-overlay').style.display = 'flex';
         try {
-            const response = await fetch('/api/ppg/upload_data', {
-                method: 'POST',
-                body: formData,
-                headers: {
-                    'X-API-KEY': '0de34eb2-cb58-4f1e-a7b8-2e55cf0e5331'
-                }
+            const resp = await fetch('/api/ppg/upload_data', { method: 'POST', body: formData, headers: { 'X-API-KEY': '0de34eb2-cb58-4f1e-a7b8-2e55cf0e5331' } });
+            const data = await resp.json();
+            if (!resp.ok || !data.success) { throw new Error(data.error || 'Upload failed'); }
+            lastUploadedFilename = data.uploaded_filename;
+            const chains = data.chains || [];
+            const container = document.getElementById('chains-container');
+            const list = document.getElementById('chains-list');
+            list.innerHTML = '';
+            chains.sort().forEach(ch => {
+                const id = 'chain-' + btoa(ch).replace(/=/g,'');
+                const div = document.createElement('div');
+                div.className = 'form-check';
+                div.innerHTML = `<input class="form-check-input" type="checkbox" value="${ch}" id="${id}"> <label class="form-check-label" for="${id}">${ch}</label>`;
+                list.appendChild(div);
             });
-            if (!response.ok) {
-                document.getElementById('loading-overlay').style.display = 'none';
-                alert('Upload failed.');
-                return;
-            }
-            const result = await response.json();
-            if (result.success && result.pptx_path) {
-                // Deduped download container
+            container.classList.remove('d-none');
+            alert('Chains loaded. Select the ones to include, then click Generate Report.');
+        } catch (e) {
+            alert('Error: ' + e.message);
+        } finally {
+            document.getElementById('loading-overlay').style.display = 'none';
+        }
+    });
+
+    // Step 2: Generate with selected chains
+    document.getElementById('dashboard-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+    if (!lastUploadedFilename) { alert('Please upload data and load chains first.'); return; }
+        const selected = Array.from(document.querySelectorAll('#chains-list input[type="checkbox"]:checked')).map(x => x.value);
+        if (selected.length === 0) { alert('Please select at least one chain.'); return; }
+        // Read the latest month and report type selections at generate time
+        const currentMonth = document.getElementById('month-selector').value;
+        const currentReportType = document.getElementById('report-type').value;
+        document.getElementById('loading-overlay').style.display = 'flex';
+    try {
+            const resp = await fetch('/api/ppg/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-API-KEY': '0de34eb2-cb58-4f1e-a7b8-2e55cf0e5331' },
+    body: JSON.stringify({ uploaded_filename: lastUploadedFilename, selected_chains: selected, month: currentMonth, report_type: currentReportType, cpt_time_dict: (() => { const d={}; document.querySelectorAll('#cpt-time-table tbody tr').forEach(r=>{ const c=r.querySelector('td:nth-child(1) input').value.trim(); const m=r.querySelector('td:nth-child(2) input').value.trim(); if(c && m) d[c]=Number(m); }); return d; })() })
+            });
+            const result = await resp.json();
+            if (resp.ok && result.success && result.pptx_path) {
                 const containerId = 'pptx-download-div';
                 let c = document.getElementById(containerId);
-                if (!c) {
-                    c = document.createElement('div');
-                    c.id = containerId;
-                    c.className = 'text-center my-3';
-                    document.querySelector('.dashboard-container').appendChild(c);
-                } else {
-                    c.innerHTML = '';
-                }
+                if (!c) { c = document.createElement('div'); c.id = containerId; c.className = 'text-center my-3'; document.querySelector('.dashboard-container').appendChild(c); }
+                else { c.innerHTML = ''; }
                 const a = document.createElement('a');
                 const downloadUrl = (result.pptx_path.startsWith('/') ? result.pptx_path : ('/' + result.pptx_path)) + '?delete=1';
-                a.href = downloadUrl;
-                a.className = 'btn btn-success';
-                a.setAttribute('download', 'generated_pbj_report.pptx');
-                a.textContent = 'Download PowerPoint Report';
+                a.href = downloadUrl; a.className = 'btn btn-success'; a.setAttribute('download', 'generated_pbj_report.pptx'); a.textContent = 'Download PowerPoint Report';
                 c.appendChild(a);
-                // auto-delete after download click (quiet)
                 attachAutoDelete(a, ['generated_pbj_report.pptx']);
-
-                // Add manual cleanup button (deduped)
-                const cleanupId = 'cleanup-div';
-                let cleanupDiv = document.getElementById(cleanupId);
-                if (!cleanupDiv) {
-                    cleanupDiv = document.createElement('div');
-                    cleanupDiv.id = cleanupId;
-                    cleanupDiv.className = 'text-center my-2';
-                    const btn = document.createElement('button');
-                    btn.type = 'button';
-                    btn.className = 'btn btn-outline-danger btn-sm';
-                    btn.textContent = 'Delete generated files';
-                    btn.onclick = () => deleteGenerated(['generated_pbj_report.pptx']);
-                    document.querySelector('.dashboard-container').appendChild(cleanupDiv);
-                    cleanupDiv.appendChild(btn);
-                }
             } else {
-                alert('Processing failed.');
+                alert('Generation failed: ' + (result.error || 'Unknown error'));
             }
         } catch (err) {
-            alert('Error uploading: ' + err.message);
+            alert('Error generating: ' + err.message);
         } finally {
             document.getElementById('loading-overlay').style.display = 'none';
         }

@@ -2,7 +2,7 @@ import pandas as pd
 import os
 import requests
 import os
-from flask import Flask, request, jsonify, render_template, send_file
+from flask import Flask, request, jsonify, render_template, send_file, redirect
 import time
 from werkzeug.utils import secure_filename
 import sys
@@ -32,6 +32,62 @@ print("Base Directory:", BASE_DIR)
 UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+# --- Secure connection settings (HTTPS enforcement in production) ---
+from werkzeug.middleware.proxy_fix import ProxyFix
+
+# Trust X-Forwarded-* headers from a single proxy (e.g., Render/Heroku/Nginx)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+
+# Enable HTTPS enforcement automatically on Render or when explicitly requested
+ENFORCE_HTTPS = (os.environ.get('RENDER') is not None) or (os.environ.get('ENFORCE_HTTPS') == '1')
+
+# Secure cookie and URL scheme preferences
+app.config.update(
+    SESSION_COOKIE_SECURE=ENFORCE_HTTPS,
+    REMEMBER_COOKIE_SECURE=ENFORCE_HTTPS,
+    SESSION_COOKIE_SAMESITE='Lax',
+    PREFERRED_URL_SCHEME='https' if ENFORCE_HTTPS else 'http'
+)
+
+def _is_request_secure() -> bool:
+    """Determine if current request is over HTTPS, accounting for proxies."""
+    try:
+        if request.is_secure:
+            return True
+        xf_proto = (request.headers.get('X-Forwarded-Proto') or '').lower()
+        if 'https' in xf_proto:
+            return True
+        xf_ssl = (request.headers.get('X-Forwarded-SSL') or '').lower()
+        if xf_ssl == 'on':
+            return True
+    except Exception:
+        pass
+    return False
+
+@app.before_request
+def _redirect_http_to_https():
+    """Redirect HTTP to HTTPS in production to ensure secure downloads."""
+    if not ENFORCE_HTTPS:
+        return
+    # Allow local development hosts without redirect
+    host_only = (request.host or '').split(':')[0]
+    if host_only in ('localhost', '127.0.0.1'):
+        return
+    if not _is_request_secure():
+        secure_url = request.url.replace('http://', 'https://', 1)
+        return redirect(secure_url, code=308)
+
+@app.after_request
+def _add_hsts(response):
+    """Add HSTS header when enforcing HTTPS and the request is secure."""
+    try:
+        if ENFORCE_HTTPS and _is_request_secure():
+            # 1 year HSTS with subdomains; include 'preload' for browsers that support it
+            response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains; preload'
+    except Exception:
+        pass
+    return response
 
 # --- API Key Security ---
 API_KEY = os.environ.get('API_KEY', 'your-secret-key')
@@ -356,7 +412,7 @@ def api_ppg_upload_data():
     else:
         charge_capture_df = pd.read_excel(temp_path)
 
-    # Get CPT dict
+    # Get CPT dict and persist alongside upload for reuse
     import json
     cpt_time_dict = request.form.get('cpt_time_dict')
     if cpt_time_dict:
@@ -376,11 +432,83 @@ def api_ppg_upload_data():
     report_type = request.form.get('report_type', 'Both')
     sites_tracker=pd.read_excel(os.path.join(BASE_DIR, 'static',"Site_Tracker_1754578592.xlsx"),header=2)
     sites_tracker=sites_tracker[["Name","Chain"]]
-    # Build metadata and presentation
+    # Optionally store cpt_time_dict next to uploaded file for later generate calls
+    try:
+        if cpt_time_dict:
+            sidecar = os.path.join(app.config['UPLOAD_FOLDER'], f"{os.path.splitext(filename)[0]}__cpt.json")
+            with open(sidecar, 'w', encoding='utf-8') as f:
+                json.dump(cpt_time_dict, f)
+    except Exception:
+        pass
+
+    # Build metadata only to get chains list (respect CPT mapping)
     corporate_groups, single_facilities = PBJ_MOD.group_facilities(charge_capture_df,sites_tracker)
-    metadata = PBJ_MOD.build_metadata(charge_capture_df, corporate_groups, single_facilities)
+    metadata = PBJ_MOD.build_metadata(charge_capture_df, corporate_groups, single_facilities, cpt_time_dict)
+    chains = list(metadata.keys())
+    # Return chains and uploaded filename to be reused in generation step
+    return jsonify({'success': True, 'chains': chains, 'uploaded_filename': filename, 'month': month_name, 'report_type': report_type})
+
+@app.route('/api/ppg/generate', methods=['POST'])
+def api_ppg_generate():
+    purge_old_uploads()
+    if PBJ_MOD is None:
+        return jsonify({'error': 'PPG/PBJ module not available'}), 500
+    data = request.get_json(silent=True) or {}
+    uploaded_filename = data.get('uploaded_filename') or ''
+    selected_chains = data.get('selected_chains') or []
+    override_cpt = data.get('cpt_time_dict')
+    # Validate inputs
+    if not uploaded_filename:
+        return jsonify({'success': False, 'error': 'uploaded_filename is required'}), 400
+    if not isinstance(selected_chains, list) or not selected_chains:
+        return jsonify({'success': False, 'error': 'selected_chains must be a non-empty list'}), 400
+    # Resolve uploaded file path safely
+    uploads_root = os.path.abspath(app.config['UPLOAD_FOLDER'])
+    temp_path = os.path.abspath(os.path.join(uploads_root, uploaded_filename))
+    if not temp_path.startswith(uploads_root) or not os.path.exists(temp_path):
+        return jsonify({'success': False, 'error': 'Uploaded file not found'}), 400
+    # Month and report type
+    month_index_raw = data.get('month')
+    try:
+        month_index = int(month_index_raw)
+    except (TypeError, ValueError):
+        month_index = 4
+    months = ["January", "February", "March", "April", "May", "June",
+              "July", "August", "September", "October", "November", "December"]
+    month_name = months[month_index] if 0 <= month_index < 12 else "May"
+    report_type = data.get('report_type', 'Both')
+    # Load DataFrame
+    ext = os.path.splitext(uploaded_filename)[1].lower()
+    if ext == '.csv':
+        charge_capture_df = pd.read_csv(temp_path)
+    else:
+        charge_capture_df = pd.read_excel(temp_path)
+    # Load stored CPT mapping if present and no override provided
+    cpt_time_dict = None
+    try:
+        if not override_cpt:
+            sidecar = os.path.join(app.config['UPLOAD_FOLDER'], f"{os.path.splitext(uploaded_filename)[0]}__cpt.json")
+            if os.path.exists(sidecar):
+                import json as _json
+                with open(sidecar, 'r', encoding='utf-8') as f:
+                    cpt_time_dict = _json.load(f)
+        else:
+            cpt_time_dict = override_cpt if isinstance(override_cpt, dict) else None
+    except Exception:
+        pass
+    # Load sites tracker
+    sites_tracker=pd.read_excel(os.path.join(BASE_DIR, 'static',"Site_Tracker_1754578592.xlsx"),header=2)
+    sites_tracker=sites_tracker[["Name","Chain"]]
+    # Build metadata and filter by selected chains
+    corporate_groups, single_facilities = PBJ_MOD.group_facilities(charge_capture_df,sites_tracker)
+    metadata = PBJ_MOD.build_metadata(charge_capture_df, corporate_groups, single_facilities, cpt_time_dict)
+    filtered = {k: v for k, v in metadata.items() if k in set(selected_chains)}
+    if not filtered:
+        return jsonify({'success': False, 'error': 'No matching chains found in uploaded data'}), 400
+    # Generate presentation
     prs = PBJ_MOD.load_editable_presentation(os.path.join(BASE_DIR, 'static', 'reference_slide.pptx'), month_index=month_index)
-    PBJ_MOD.generate_pbj_presentation(prs, metadata, month=month_name, report_type=report_type)
+    print(report_type)
+    PBJ_MOD.generate_pbj_presentation(prs, filtered, month=month_name, report_type=report_type)
     output_path = os.path.join(app.config['UPLOAD_FOLDER'], 'generated_pbj_report.pptx')
     prs.save(output_path)
     return jsonify({'success': True, 'pptx_path': f"uploads/generated_pbj_report.pptx", 'month': month_name, 'report_type': report_type})
